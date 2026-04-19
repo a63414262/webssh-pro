@@ -15,6 +15,20 @@ wss.on('connection', (ws, req) => {
     let sftpSession = null;
     let monitorInterval = null;
 
+    // 封装一个复用的发送目录树方法
+    const sendDirTree = (sftp) => {
+        sftp.readdir('/root', (err, list) => {
+            if (!err) {
+                const files = list.map(item => ({
+                    name: item.filename,
+                    isDir: item.longname.startsWith('d'),
+                    size: item.attrs.size
+                })).sort((a, b) => b.isDir - a.isDir);
+                ws.send(JSON.stringify({ type: 'SFTP_TREE', files }));
+            }
+        });
+    };
+
     ws.on('message', (message) => {
         if (!sshStream) {
             try {
@@ -34,16 +48,7 @@ wss.on('connection', (ws, req) => {
                     sshClient.sftp((err, sftp) => {
                         if (err) return;
                         sftpSession = sftp; 
-                        sftp.readdir('/root', (err, list) => {
-                            if (!err) {
-                                const files = list.map(item => ({
-                                    name: item.filename,
-                                    isDir: item.longname.startsWith('d'),
-                                    size: item.attrs.size
-                                })).sort((a, b) => b.isDir - a.isDir);
-                                ws.send(JSON.stringify({ type: 'SFTP_TREE', files }));
-                            }
-                        });
+                        sendDirTree(sftpSession); // 首次连接推送目录
                     });
 
                     monitorInterval = setInterval(() => {
@@ -80,22 +85,42 @@ wss.on('connection', (ws, req) => {
                 } 
                 else if (cmd.type === 'READ_FILE' && sftpSession) {
                     sftpSession.readFile(`/root/${cmd.filename}`, 'utf8', (err, data) => {
-                        if (err) {
-                            ws.send(JSON.stringify({ type: 'FILE_CONTENT', filename: cmd.filename, content: `// 读取失败: ${err.message}` }));
-                        } else {
-                            ws.send(JSON.stringify({ type: 'FILE_CONTENT', filename: cmd.filename, content: data }));
+                        if (err) ws.send(JSON.stringify({ type: 'FILE_CONTENT', filename: cmd.filename, content: `// 读取失败: ${err.message}` }));
+                        else ws.send(JSON.stringify({ type: 'FILE_CONTENT', filename: cmd.filename, content: data }));
+                    });
+                }
+                else if (cmd.type === 'WRITE_FILE' && sftpSession) {
+                    sftpSession.writeFile(`/root/${cmd.filename}`, cmd.content, 'utf8', (err) => {
+                        if (err) ws.send(JSON.stringify({ type: 'SYSTEM_MSG', data: `\r\n\x1b[31m[System] 文件 ${cmd.filename} 保存失败: ${err.message}\x1b[0m\r\n` }));
+                        else {
+                            ws.send(JSON.stringify({ type: 'SYSTEM_MSG', data: `\r\n\x1b[32m[System] 📝 文件 ${cmd.filename} 成功保存！\x1b[0m\r\n` }));
+                            sendDirTree(sftpSession); // 保存后刷新目录大小等信息
                         }
                     });
                 }
-                // 【核心新增逻辑】：接收前端的保存指令并写入服务器
-                else if (cmd.type === 'WRITE_FILE' && sftpSession) {
-                    sftpSession.writeFile(`/root/${cmd.filename}`, cmd.content, 'utf8', (err) => {
-                        if (err) {
-                            ws.send(JSON.stringify({ type: 'SYSTEM_MSG', data: `\r\n\x1b[31m[System] 文件 ${cmd.filename} 保存失败: ${err.message}\x1b[0m\r\n` }));
-                        } else {
-                            ws.send(JSON.stringify({ type: 'SYSTEM_MSG', data: `\r\n\x1b[32m[System] 📝 文件 ${cmd.filename} 成功保存至服务器！\x1b[0m\r\n` }));
+                // 【新增：处理新建文件请求】
+                else if (cmd.type === 'CREATE_FILE' && sftpSession) {
+                    sftpSession.writeFile(`/root/${cmd.filename}`, '', 'utf8', (err) => {
+                        if (err) ws.send(JSON.stringify({ type: 'SYSTEM_MSG', data: `\r\n\x1b[31m[System] 新建文件失败: ${err.message}\x1b[0m\r\n` }));
+                        else {
+                            ws.send(JSON.stringify({ type: 'SYSTEM_MSG', data: `\r\n\x1b[32m[System] 📄 成功创建文件: ${cmd.filename}\x1b[0m\r\n` }));
+                            sendDirTree(sftpSession); // 创建成功后，自动下发最新目录树
                         }
                     });
+                }
+                // 【新增：处理新建文件夹请求】
+                else if (cmd.type === 'CREATE_DIR' && sftpSession) {
+                    sftpSession.mkdir(`/root/${cmd.dirname}`, (err) => {
+                        if (err) ws.send(JSON.stringify({ type: 'SYSTEM_MSG', data: `\r\n\x1b[31m[System] 新建文件夹失败: ${err.message}\x1b[0m\r\n` }));
+                        else {
+                            ws.send(JSON.stringify({ type: 'SYSTEM_MSG', data: `\r\n\x1b[32m[System] 📁 成功创建文件夹: ${cmd.dirname}\x1b[0m\r\n` }));
+                            sendDirTree(sftpSession);
+                        }
+                    });
+                }
+                // 【新增：处理手动刷新目录请求】
+                else if (cmd.type === 'REFRESH_DIR' && sftpSession) {
+                    sendDirTree(sftpSession);
                 }
             } catch(e) { 
                 if (sshStream) sshStream.write(message); 
