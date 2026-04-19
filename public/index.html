@@ -3,115 +3,152 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>WebSSH | Ultimate OS</title>
+    <title>H Terminals | Ultimate OS</title>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css" />
     <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.6/require.min.js"></script>
     <style>
-        :root { --bg: #1e1e1e; --panel: #252526; --border: #333; --text: #ccc; }
-        body { margin: 0; background: var(--bg); color: var(--text); font-family: Consolas, monospace; height: 100vh; overflow: hidden; display: flex; flex-direction: column; }
-        .header { height: 40px; background: #333; display: flex; align-items: center; padding: 0 15px; font-weight: bold; color: #fff; }
-        .desktop { flex: 1; display: grid; grid-template-columns: 200px 1fr 250px; overflow: hidden; }
+        :root { --bg: #111b15; --panel: #1a231c; --border: #2c3c31; --text: #a0c2a8; --accent: #00ff66; }
+        body { margin: 0; background: var(--bg); color: var(--text); font-family: 'Segoe UI', Consolas, monospace; height: 100vh; overflow: hidden; display: flex; flex-direction: column; }
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-thumb { background: #3c4c41; border-radius: 3px; }
         
-        /* 模块面板基础样式 */
-        .panel { background: var(--panel); border: 1px solid var(--border); display: flex; flex-direction: column; overflow: hidden; }
-        .panel-title { padding: 5px 10px; font-size: 12px; background: #2d2d2d; border-bottom: 1px solid var(--border); color: #888; }
+        .header { height: 45px; background: #0a120c; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; padding: 0 20px; }
+        .header .logo { color: var(--accent); font-weight: bold; font-size: 16px; text-shadow: 0 0 10px rgba(0,255,102,0.3); }
         
-        /* 左侧文件树 */
-        #fileManager { padding: 10px; font-size: 13px; overflow-y: auto; color: #d4d4d4; }
-        .file-item { padding: 4px; cursor: pointer; border-bottom: 1px solid #333; }
-        .file-item:hover { background: #2a2d2e; }
+        .desktop { flex: 1; display: grid; grid-template-columns: 220px 1fr 280px; overflow: hidden; }
+        .panel { background: var(--panel); border-right: 1px solid var(--border); display: flex; flex-direction: column; }
+        .panel-title { padding: 8px 15px; font-size: 12px; font-weight: bold; background: #141c16; border-bottom: 1px solid var(--border); color: #fff; display: flex; justify-content: space-between;}
+        
+        /* 文件树 */
+        #fileManager { flex: 1; overflow-y: auto; padding: 5px; font-size: 13px; }
+        .file-item { padding: 6px 10px; cursor: pointer; border-radius: 4px; display: flex; align-items: center; gap: 8px; }
+        .file-item:hover { background: rgba(0, 255, 102, 0.1); color: var(--accent); }
+        .icon-dir { color: #dcb67a; }
+        .icon-file { color: #888; }
 
-        /* 中部区域分屏 */
-        .main-area { display: grid; grid-template-rows: 1fr 1fr; gap: 2px; background: var(--bg); }
-        #editorArea { padding: 10px; font-size: 14px; color: #9cdcfe; } /* Monaco 预留位 */
-        #terminalWrapper { padding: 5px; background: #000; }
+        /* 中部双分屏 */
+        .main-area { display: grid; grid-template-rows: 55% 45%; border-right: 1px solid var(--border); }
+        .editor-container { position: relative; width: 100%; height: 100%; overflow: hidden; }
+        #terminalWrapper { flex: 1; padding: 5px 10px; background: #000; overflow: hidden; }
         
-        /* 右侧仪表盘 */
-        .dashboard { padding: 10px; overflow-y: auto; }
-        .chart-box { height: 150px; width: 100%; margin-bottom: 15px; }
+        /* 仪表盘 */
+        .dashboard { padding: 15px; overflow-y: auto; display: flex; flex-direction: column; gap: 20px;}
+        .chart-box { height: 180px; width: 100%; }
 
-        /* 极简登录层 */
-        #loginOverlay { position: absolute; inset: 0; background: rgba(0,0,0,0.9); display: flex; justify-content: center; align-items: center; z-index: 999; }
-        .login-box { display: flex; gap: 10px; }
-        input { background: #333; color: #fff; border: 1px solid #555; padding: 8px; border-radius: 4px;}
-        button { background: #007acc; color: #fff; border: none; padding: 8px 15px; cursor: pointer; font-weight: bold; border-radius: 4px;}
+        /* 极客风登录框 */
+        #loginOverlay { position: absolute; inset: 0; background: rgba(0,0,0,0.85); backdrop-filter: blur(5px); display: flex; justify-content: center; align-items: center; z-index: 999; transition: 0.3s; }
+        .login-box { background: #161e18; border: 1px solid var(--accent); padding: 30px; width: 350px; border-radius: 8px; box-shadow: 0 0 30px rgba(0,255,102,0.1); display: grid; gap: 15px; }
+        input { background: #0a120c; color: #fff; border: 1px solid #3c4c41; padding: 10px; border-radius: 4px; font-family: monospace; outline: none;}
+        input:focus { border-color: var(--accent); }
+        button { background: var(--accent); color: #000; border: none; padding: 12px; cursor: pointer; font-weight: bold; border-radius: 4px; transition: 0.2s;}
+        button:hover { background: #00cc52; box-shadow: 0 0 15px rgba(0,255,102,0.4);}
     </style>
 </head>
 <body>
     <div id="loginOverlay">
         <div class="login-box">
-            <input type="text" id="host" placeholder="IP" value="127.0.0.1">
-            <input type="text" id="user" placeholder="Root" value="root">
+            <h2 style="margin:0 0 10px 0; color:#fff;">系统直连凭证</h2>
+            <input type="text" id="host" placeholder="Server IP" value="127.0.0.1">
+            <input type="text" id="user" placeholder="Username" value="root">
             <input type="password" id="pass" placeholder="Password">
-            <button onclick="connect()">Connect Engine</button>
+            <button onclick="connectEngine()">⚡ 建立满血连接</button>
         </div>
     </div>
 
-    <div class="header">🚀 OS Terminal (Framework Mode)</div>
+    <div class="header">
+        <div class="logo">🚀 WebSSH | Master OS</div>
+        <div style="font-size: 12px; color: #888;">System Uptime: <span style="color:var(--accent)">Running</span></div>
+    </div>
     
     <div class="desktop">
         <div class="panel">
-            <div class="panel-title">/root 资源管理器 (SFTP)</div>
-            <div id="fileManager">等待连接数据...</div>
+            <div class="panel-title"><span>📁 /root</span> <span>🔄</span></div>
+            <div id="fileManager"></div>
         </div>
 
         <div class="main-area">
-            <div class="panel" style="border-bottom: 2px solid #007acc;">
-                <div class="panel-title">Editor / Preview (Monaco 预留位)</div>
-                <div id="editorArea">// [准备就绪] 后续可在此挂载 Monaco Editor 渲染远端代码文件...</div>
+            <div class="panel" style="border-bottom: 2px solid var(--border);">
+                <div class="panel-title"><span>📝 Code Editor (Monaco)</span> <span>Save (Ctrl+S)</span></div>
+                <div class="editor-container" id="editorArea"></div>
             </div>
             <div class="panel">
-                <div class="panel-title">Terminal</div>
-                <div id="terminalWrapper" style="flex:1;"></div>
+                <div class="panel-title"><span>🖥️ Terminal</span> <span>bash</span></div>
+                <div id="terminalWrapper"></div>
             </div>
         </div>
 
-        <div class="panel dashboard">
-            <div class="panel-title">系统状态 (ECharts)</div>
-            <div id="cpuChart" class="chart-box"></div>
-            <div id="netChart" class="chart-box"></div>
+        <div class="panel">
+            <div class="panel-title">📊 性能态势感知</div>
+            <div class="dashboard">
+                <div id="gaugeChart" class="chart-box"></div>
+                <div id="netChart" class="chart-box" style="height: 220px;"></div>
+            </div>
         </div>
     </div>
 
     <script>
-        // 初始化 Terminal
-        const term = new Terminal({ cursorBlink: true, theme: { background: '#000' }});
+        // ================= 1. 初始化 Monaco Editor =================
+        let monacoEditor;
+        require.config({ paths: { 'vs': 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.39.0/min/vs' }});
+        require(['vs/editor/editor.main'], function() {
+            monacoEditor = monaco.editor.create(document.getElementById('editorArea'), {
+                value: "// 选中左侧文件以在此处编辑...\n\nfunction init() {\n  console.log('Engine Ready!');\n}",
+                language: 'javascript',
+                theme: 'vs-dark',
+                automaticLayout: true,
+                minimap: { enabled: false }
+            });
+        });
+
+        // ================= 2. 初始化 xterm.js =================
+        const term = new Terminal({ cursorBlink: true, theme: { background: '#000', foreground: '#a0c2a8' }, fontFamily: 'Consolas' });
         const fitAddon = new FitAddon.FitAddon();
         term.loadAddon(fitAddon);
         term.open(document.getElementById('terminalWrapper'));
-        setTimeout(() => fitAddon.fit(), 200);
-        window.onresize = () => fitAddon.fit();
+        setTimeout(() => fitAddon.fit(), 100);
+        window.addEventListener('resize', () => fitAddon.fit());
 
-        // 初始化 ECharts (以CPU多核雷达图为例)
-        const cpuChart = echarts.init(document.getElementById('cpuChart'), 'dark');
-        cpuChart.setOption({
+        // ================= 3. 初始化 ECharts 仪表盘 =================
+        const gaugeChart = echarts.init(document.getElementById('gaugeChart'), 'dark');
+        const netChart = echarts.init(document.getElementById('netChart'), 'dark');
+        
+        gaugeChart.setOption({
             backgroundColor: 'transparent',
-            title: { text: 'CPU Cores', textStyle: { fontSize: 12, color: '#888' } },
-            xAxis: { type: 'category', data: ['Core1', 'Core2', 'Core3', 'Core4'], show: false },
-            yAxis: { type: 'value', max: 100, show: false },
-            series: [{ type: 'bar', data: [0,0,0,0], itemStyle: { color: '#0f0' } }]
+            series: [
+                { type: 'gauge', center: ['25%', '50%'], radius: '80%', progress: { show: true, width: 8 }, axisLine: { lineStyle: { width: 8 } }, axisTick: { show: false }, splitLine: { show: false }, axisLabel: { show: false }, pointer: { show: false }, detail: { valueAnimation: true, fontSize: 14, color: '#fff', formatter: '{value}%' }, data: [{ value: 0, name: 'CPU' }], title: { fontSize: 12, offsetCenter: [0, '80%'] } },
+                { type: 'gauge', center: ['75%', '50%'], radius: '80%', progress: { show: true, width: 8, itemStyle: { color: '#007acc' } }, axisLine: { lineStyle: { width: 8 } }, axisTick: { show: false }, splitLine: { show: false }, axisLabel: { show: false }, pointer: { show: false }, detail: { valueAnimation: true, fontSize: 14, color: '#fff', formatter: '{value}%' }, data: [{ value: 0, name: 'RAM' }], title: { fontSize: 12, offsetCenter: [0, '80%'] } }
+            ]
         });
 
-        const netChart = echarts.init(document.getElementById('netChart'), 'dark');
+        const timeData = Array(20).fill('');
+        const rxData = Array(20).fill(0);
         netChart.setOption({
             backgroundColor: 'transparent',
-            title: { text: 'Network Traffic', textStyle: { fontSize: 12, color: '#888' } },
-            xAxis: { type: 'category', data: ['','','','',''] },
-            yAxis: { type: 'value', show: false },
-            series: [{ type: 'line', data: [0,0,0,0,0], areaStyle: {}, smooth: true }]
+            title: { text: 'Network Traffic (KB/s)', textStyle: { fontSize: 12, color: '#888' } },
+            grid: { left: 30, right: 10, bottom: 20, top: 40 },
+            xAxis: { type: 'category', boundaryGap: false, data: timeData, show: false },
+            yAxis: { type: 'value', splitLine: { lineStyle: { color: '#2c3c31' } } },
+            series: [{ type: 'line', data: rxData, areaStyle: { color: 'rgba(0, 255, 102, 0.2)' }, itemStyle: { color: '#00ff66' }, smooth: true }]
         });
-        let netData = [0,0,0,0,0];
 
+        // ================= 4. WebSocket 核心引擎 =================
         let ws = null;
 
-        function connect() {
-            document.getElementById('loginOverlay').style.display = 'none';
+        function connectEngine() {
+            document.getElementById('loginOverlay').style.opacity = '0';
+            setTimeout(() => document.getElementById('loginOverlay').style.display = 'none', 300);
+            
+            term.reset();
+            term.writeln('\x1b[33m[Engine]\x1b[0m 正在打通 OS 底层协议簇...');
+
             ws = new WebSocket(window.location.protocol === 'https:' ? 'wss://' : 'ws://' + window.location.host + '/');
             
+            // 终端按键捕获并发送
             term.onData(data => { 
-                if(ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({type: 'TERMINAL_INPUT', data})); 
+                if(ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'TERMINAL_INPUT', data })); 
             });
 
             ws.onopen = () => {
@@ -126,25 +163,34 @@
             ws.onmessage = (e) => {
                 const packet = JSON.parse(e.data);
                 
-                // 数据路由分发机制 (全新架构)
-                switch(packet.type) {
-                    case 'SYSTEM':
-                    case 'TERMINAL':
-                        term.write(packet.data || packet.msg);
-                        break;
-                    case 'SFTP_INIT':
-                        // 渲染左侧文件树
-                        document.getElementById('fileManager').innerHTML = packet.files.map(f => `<div class="file-item">📄 ${f}</div>`).join('');
-                        break;
-                    case 'MONITOR':
-                        // 动态更新右侧 ECharts
-                        cpuChart.setOption({ series: [{ data: packet.cpuCores }]});
-                        netData.shift(); netData.push(packet.netDown);
-                        netChart.setOption({ series: [{ data: netData }]});
-                        break;
+                // OS 级事件路由
+                if (packet.type === 'TERMINAL') {
+                    term.write(packet.data);
+                } 
+                else if (packet.type === 'SFTP_TREE') {
+                    // 渲染文件树
+                    const html = packet.files.map(f => {
+                        const icon = f.isDir ? '<span class="icon-dir">📁</span>' : '<span class="icon-file">📄</span>';
+                        return `<div class="file-item" onclick="openFile('${f.name}')">${icon} ${f.name}</div>`;
+                    }).join('');
+                    document.getElementById('fileManager').innerHTML = html;
+                }
+                else if (packet.type === 'MONITOR') {
+                    // 刷新仪表盘动画
+                    gaugeChart.setOption({ series: [{ data: [{ value: packet.cpu.toFixed(1), name: 'CPU' }] }, { data: [{ value: packet.mem.toFixed(1), name: 'RAM' }] }] });
+                    
+                    rxData.shift(); rxData.push(packet.net);
+                    netChart.setOption({ series: [{ data: rxData }] });
                 }
             };
         }
+
+        // 模拟文件点击事件
+        window.openFile = function(filename) {
+            if(monacoEditor) {
+                monacoEditor.setValue(`// 当前编辑文件: /root/${filename}\n\n// 提示：完整版需在此处向后端请求文件流并渲染...`);
+            }
+        };
     </script>
 </body>
 </html>
