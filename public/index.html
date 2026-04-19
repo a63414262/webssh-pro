@@ -4,11 +4,15 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>WebSSH | Master OS 集群版</title>
+    
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css" />
     <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.js"></script>
+    
     <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/requirejs@2.3.6/require.min.js"></script>
+    
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/ace/1.32.2/ace.js"></script>
+    
     <style>
         :root { --bg: #111b15; --panel: #1a231c; --border: #2c3c31; --text: #a0c2a8; --accent: #00ff66; --danger: #ff4d4f; }
         body { margin: 0; background: var(--bg); color: var(--text); font-family: 'Segoe UI', Consolas, monospace; height: 100vh; overflow: hidden; display: flex; flex-direction: column; }
@@ -39,7 +43,11 @@
         .icon-file { color: #888; }
 
         .main-area { display: grid; grid-template-rows: 50% 50%; border-right: 1px solid var(--border); }
-        .editor-container { flex: 1; position: relative; width: 100%; height: 100%; overflow: hidden; }
+        
+        /* 编辑器容器样式修正，确保 Ace 能正常撑满 */
+        .editor-container { position: relative; width: 100%; height: 100%; }
+        #editorArea { position: absolute; inset: 0; font-size: 14px; }
+        
         #terminalsContainer { flex: 1; position: relative; background: #000; overflow: hidden; }
         .terminal-wrapper { position: absolute; inset: 0; padding: 5px 10px; display: none; }
         .terminal-wrapper.active { display: block; }
@@ -90,7 +98,9 @@
         <div class="main-area">
             <div class="panel" style="border-bottom: 2px solid var(--border);">
                 <div class="panel-title"><span>📝 Code Editor (<span id="currentFileName">None</span>)</span> <span id="saveIndicator" style="cursor:pointer; transition:0.3s;" onclick="saveCurrentFile()">Save (Ctrl+S)</span></div>
-                <div class="editor-container" id="editorArea"></div>
+                <div class="editor-container">
+                    <div id="editorArea"></div>
+                </div>
             </div>
             <div class="panel">
                 <div class="panel-title"><span>🖥️ Terminal</span> <span id="currentTermHost">bash</span></div>
@@ -111,39 +121,28 @@
         const sessions = {}; 
         let activeId = null; 
 
-        // ================= 解决 Monaco 跨域 Worker 死机问题 =================
-        window.MonacoEnvironment = {
-            getWorkerUrl: function(workerId, label) {
-                return `data:text/javascript;charset=utf-8,${encodeURIComponent(`
-                    self.MonacoEnvironment = { baseUrl: 'https://cdn.jsdelivr.net/npm/monaco-editor@0.39.0/min/' };
-                    importScripts('https://cdn.jsdelivr.net/npm/monaco-editor@0.39.0/min/vs/base/worker/workerMain.js');
-                `)}`;
-            }
-        };
-
-        let monacoEditor;
-        require.config({ paths: { 'vs': 'https://cdn.jsdelivr.net/npm/monaco-editor@0.39.0/min/vs' }});
-        require(['vs/editor/editor.main'], function() {
-            monacoEditor = monaco.editor.create(document.getElementById('editorArea'), {
-                value: "// 【双击】左侧文件以在此处加载远端文件流...\n// 【编辑后】按下 Ctrl+S 即可直接保存至远端服务器！",
-                language: 'javascript', theme: 'vs-dark', automaticLayout: true, minimap: { enabled: false }
-            });
-
-            // 【核心新增】：拦截编辑器的 Ctrl+S 快捷键
-            monacoEditor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, function() {
-                saveCurrentFile();
-            });
+        // ================= 1. 初始化 Ace Editor =================
+        const editor = ace.edit("editorArea");
+        editor.setTheme("ace/theme/twilight"); // 使用暗黑极客主题
+        editor.session.setMode("ace/mode/sh"); // 默认使用 shell 语法高亮
+        editor.setValue("// 建立连接并在左侧【双击】文件，以在此处加载远端文件流...\n// 【编辑后】按下 Ctrl+S 即可直接保存至远端服务器！", -1);
+        
+        // 绑定 Ctrl+S 热键拦截
+        editor.commands.addCommand({
+            name: 'saveFile',
+            bindKey: {win: "Ctrl-S", mac: "Command-S"},
+            exec: function(editor) { saveCurrentFile(); }
         });
 
-        // 保存文件流到远端服务器
+        // ================= 2. 文件保存逻辑 =================
         window.saveCurrentFile = function() {
             const filename = document.getElementById('currentFileName').innerText;
             if(!activeId || !sessions[activeId] || !sessions[activeId].ws || filename === 'None') return;
             
-            const content = monacoEditor.getValue();
+            const content = editor.getValue();
             sessions[activeId].ws.send(JSON.stringify({ type: 'WRITE_FILE', filename: filename, content: content }));
             
-            // 酷炫的保存动画反馈
+            // 酷炫保存动画反馈
             const saveBtn = document.getElementById('saveIndicator');
             saveBtn.innerText = '⏳ Saving...';
             saveBtn.style.color = '#ffeb3b';
@@ -154,6 +153,7 @@
             }, 500);
         };
 
+        // ================= 3. 监控仪表盘 =================
         const gaugeChart = echarts.init(document.getElementById('gaugeChart'), 'dark');
         const netChart = echarts.init(document.getElementById('netChart'), 'dark');
         
@@ -171,6 +171,7 @@
         function showLoginBox() { document.getElementById('loginOverlay').style.display = 'flex'; setTimeout(() => document.getElementById('loginOverlay').style.opacity = '1', 10); document.getElementById('closeLoginBtn').style.display = Object.keys(sessions).length > 0 ? 'block' : 'none'; }
         function hideLoginBox() { document.getElementById('loginOverlay').style.opacity = '0'; setTimeout(() => document.getElementById('loginOverlay').style.display = 'none', 300); }
 
+        // ================= 4. 核心连接引擎 =================
         function connectEngine() {
             const host = document.getElementById('host').value.trim();
             const port = parseInt(document.getElementById('port').value) || 22;
@@ -213,24 +214,25 @@
                 if (packet.type === 'TERMINAL') {
                     term.write(packet.data);
                 } 
-                // 打印后端发来的保存成功/失败信息到下方终端
                 else if (packet.type === 'SYSTEM_MSG') {
-                    term.write(packet.data);
+                    term.write(packet.data); // 打印后端提示（比如保存成功）
                 }
                 else if (packet.type === 'SFTP_TREE') {
                     sessions[id].filesHTML = packet.files.map(f => {
                         const icon = f.isDir ? '<span class="icon-dir">📁</span>' : '<span class="icon-file">📄</span>';
-                        // 【核心改动】：单击选中背景色，双击触发打开文件！
                         return `<div class="file-item" onclick="selectFileDom(this)" ondblclick="openFile('${f.name}')">${icon} ${f.name}</div>`;
                     }).join('');
                     if(activeId === id) updateActiveUI();
                 }
+                // 【接收文件数据并交给 Ace Editor 渲染】
                 else if (packet.type === 'FILE_CONTENT') {
-                    if (activeId === id && monacoEditor) {
-                        monacoEditor.setValue(packet.content);
+                    if (activeId === id) {
+                        editor.setValue(packet.content, -1);
+                        
+                        // 智能判断语法高亮模式
                         const ext = packet.filename.split('.').pop().toLowerCase();
-                        const langMap = { 'js':'javascript', 'json':'json', 'html':'html', 'css':'css', 'sh':'shell', 'bash':'shell', 'py':'python', 'yaml':'yaml', 'yml':'yaml', 'conf':'ini' };
-                        monaco.editor.setModelLanguage(monacoEditor.getModel(), langMap[ext] || 'plaintext');
+                        const modeMap = { 'js':'javascript', 'json':'json', 'html':'html', 'css':'css', 'sh':'sh', 'bash':'sh', 'py':'python', 'yaml':'yaml', 'yml':'yaml', 'conf':'ini', 'xml':'xml' };
+                        editor.session.setMode(`ace/mode/${modeMap[ext] || 'text'}`);
                     }
                 }
                 else if (packet.type === 'MONITOR') {
@@ -249,7 +251,6 @@
             renderServerList();
         }
 
-        // 文件点击选中效果
         window.selectFileDom = function(el) {
             document.querySelectorAll('.file-item').forEach(e => e.classList.remove('selected'));
             el.classList.add('selected');
@@ -295,10 +296,11 @@
         
         window.addEventListener('resize', () => { if(activeId && sessions[activeId]) sessions[activeId].fitAddon.fit(); });
 
+        // 双击发送获取文件请求
         window.openFile = function(filename) {
             if(!activeId || !sessions[activeId] || !sessions[activeId].ws) return;
             document.getElementById('currentFileName').innerText = filename;
-            if(monacoEditor) monacoEditor.setValue(`// 正在从节点拉取文件流: /root/${filename} \n// 🚀 Engine Requesting...`);
+            editor.setValue(`// 正在从节点拉取文件流: /root/${filename} \n// 🚀 Engine Requesting...`, -1);
             sessions[activeId].ws.send(JSON.stringify({ type: 'READ_FILE', filename: filename }));
         };
     </script>
