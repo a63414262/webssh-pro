@@ -1,0 +1,14 @@
+{
+  "name": "webssh-pro",
+  "version": "1.0.0",
+  "description": "Serverless WebSSH All-in-One",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "ssh2": "^1.15.0",
+    "ws": "^8.13.0"
+  }
+}
