@@ -8,9 +8,7 @@
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css" />
     <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.js"></script>
-    
     <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
-    
     <script src="https://cdnjs.cloudflare.com/ajax/libs/ace/1.32.2/ace.js"></script>
     
     <style>
@@ -35,6 +33,10 @@
         .server-item .close-btn { color: #555; font-weight: bold; }
         .server-item .close-btn:hover { color: var(--danger); }
 
+        /* 文件操作按钮组 */
+        .file-actions span { cursor: pointer; margin-left: 8px; transition: 0.2s; opacity: 0.7; }
+        .file-actions span:hover { opacity: 1; color: var(--accent); }
+
         #fileManager { flex: 1; overflow-y: auto; padding: 5px; font-size: 13px; }
         .file-item { padding: 6px 10px; cursor: pointer; border-radius: 4px; display: flex; align-items: center; gap: 8px; user-select: none; border-left: 2px solid transparent;}
         .file-item:hover { background: rgba(0, 255, 102, 0.1); color: var(--accent); }
@@ -43,8 +45,6 @@
         .icon-file { color: #888; }
 
         .main-area { display: grid; grid-template-rows: 50% 50%; border-right: 1px solid var(--border); }
-        
-        /* 编辑器容器样式修正，确保 Ace 能正常撑满 */
         .editor-container { position: relative; width: 100%; height: 100%; }
         #editorArea { position: absolute; inset: 0; font-size: 14px; }
         
@@ -91,7 +91,16 @@
         <div class="panel">
             <div class="panel-title"><span>🌐 节点集群</span> <span class="add-btn" onclick="showLoginBox()">+ Add</span></div>
             <div id="serverList"></div>
-            <div class="panel-title" style="border-top: 1px solid var(--border);"><span>📁 /root (<span id="currentFileHost">None</span>)</span> <span>🔄</span></div>
+            
+            <div class="panel-title" style="border-top: 1px solid var(--border);">
+                <span>📁 /root (<span id="currentFileHost">None</span>)</span> 
+                <span class="file-actions">
+                    <span title="新建文件" onclick="createNode('file')">📄+</span>
+                    <span title="新建文件夹" onclick="createNode('dir')">📁+</span>
+                    <span title="刷新目录" onclick="refreshDir()">🔄</span>
+                </span>
+            </div>
+            
             <div id="fileManager" style="color:#666; text-align:center; padding-top:20px;">未选择活跃节点</div>
         </div>
 
@@ -121,20 +130,17 @@
         const sessions = {}; 
         let activeId = null; 
 
-        // ================= 1. 初始化 Ace Editor =================
         const editor = ace.edit("editorArea");
-        editor.setTheme("ace/theme/twilight"); // 使用暗黑极客主题
-        editor.session.setMode("ace/mode/sh"); // 默认使用 shell 语法高亮
+        editor.setTheme("ace/theme/twilight"); 
+        editor.session.setMode("ace/mode/sh"); 
         editor.setValue("// 建立连接并在左侧【双击】文件，以在此处加载远端文件流...\n// 【编辑后】按下 Ctrl+S 即可直接保存至远端服务器！", -1);
         
-        // 绑定 Ctrl+S 热键拦截
         editor.commands.addCommand({
             name: 'saveFile',
             bindKey: {win: "Ctrl-S", mac: "Command-S"},
             exec: function(editor) { saveCurrentFile(); }
         });
 
-        // ================= 2. 文件保存逻辑 =================
         window.saveCurrentFile = function() {
             const filename = document.getElementById('currentFileName').innerText;
             if(!activeId || !sessions[activeId] || !sessions[activeId].ws || filename === 'None') return;
@@ -142,7 +148,6 @@
             const content = editor.getValue();
             sessions[activeId].ws.send(JSON.stringify({ type: 'WRITE_FILE', filename: filename, content: content }));
             
-            // 酷炫保存动画反馈
             const saveBtn = document.getElementById('saveIndicator');
             saveBtn.innerText = '⏳ Saving...';
             saveBtn.style.color = '#ffeb3b';
@@ -153,7 +158,33 @@
             }, 500);
         };
 
-        // ================= 3. 监控仪表盘 =================
+        // ================= 【核心新增】：文件与目录管理功能 =================
+        window.createNode = function(type) {
+            if(!activeId || !sessions[activeId] || !sessions[activeId].ws) return alert('请先连接并选择一个活跃节点');
+            
+            const name = prompt(`请输入新${type === 'file' ? '文件' : '文件夹'}名称：`);
+            if(!name || name.trim() === '') return;
+            
+            if(type === 'file') {
+                sessions[activeId].ws.send(JSON.stringify({ type: 'CREATE_FILE', filename: name.trim() }));
+            } else {
+                sessions[activeId].ws.send(JSON.stringify({ type: 'CREATE_DIR', dirname: name.trim() }));
+            }
+        };
+
+        window.refreshDir = function() {
+            if(!activeId || !sessions[activeId] || !sessions[activeId].ws) return;
+            sessions[activeId].ws.send(JSON.stringify({ type: 'REFRESH_DIR' }));
+            
+            // 给刷新按钮一个小反馈
+            const fileHost = document.getElementById('currentFileHost');
+            const originalText = fileHost.innerText;
+            fileHost.innerText = 'Refreshed!';
+            fileHost.style.color = '#00ff66';
+            setTimeout(() => { fileHost.innerText = originalText; fileHost.style.color = ''; }, 800);
+        };
+
+
         const gaugeChart = echarts.init(document.getElementById('gaugeChart'), 'dark');
         const netChart = echarts.init(document.getElementById('netChart'), 'dark');
         
@@ -171,7 +202,6 @@
         function showLoginBox() { document.getElementById('loginOverlay').style.display = 'flex'; setTimeout(() => document.getElementById('loginOverlay').style.opacity = '1', 10); document.getElementById('closeLoginBtn').style.display = Object.keys(sessions).length > 0 ? 'block' : 'none'; }
         function hideLoginBox() { document.getElementById('loginOverlay').style.opacity = '0'; setTimeout(() => document.getElementById('loginOverlay').style.display = 'none', 300); }
 
-        // ================= 4. 核心连接引擎 =================
         function connectEngine() {
             const host = document.getElementById('host').value.trim();
             const port = parseInt(document.getElementById('port').value) || 22;
@@ -215,21 +245,20 @@
                     term.write(packet.data);
                 } 
                 else if (packet.type === 'SYSTEM_MSG') {
-                    term.write(packet.data); // 打印后端提示（比如保存成功）
+                    term.write(packet.data);
                 }
                 else if (packet.type === 'SFTP_TREE') {
                     sessions[id].filesHTML = packet.files.map(f => {
                         const icon = f.isDir ? '<span class="icon-dir">📁</span>' : '<span class="icon-file">📄</span>';
-                        return `<div class="file-item" onclick="selectFileDom(this)" ondblclick="openFile('${f.name}')">${icon} ${f.name}</div>`;
+                        // 如果是文件夹，双击事件可以留空或者以后用来进入目录，目前仅对文件打开编辑器
+                        const dblclick = f.isDir ? '' : `ondblclick="openFile('${f.name}')"`;
+                        return `<div class="file-item" onclick="selectFileDom(this)" ${dblclick}>${icon} ${f.name}</div>`;
                     }).join('');
                     if(activeId === id) updateActiveUI();
                 }
-                // 【接收文件数据并交给 Ace Editor 渲染】
                 else if (packet.type === 'FILE_CONTENT') {
                     if (activeId === id) {
                         editor.setValue(packet.content, -1);
-                        
-                        // 智能判断语法高亮模式
                         const ext = packet.filename.split('.').pop().toLowerCase();
                         const modeMap = { 'js':'javascript', 'json':'json', 'html':'html', 'css':'css', 'sh':'sh', 'bash':'sh', 'py':'python', 'yaml':'yaml', 'yml':'yaml', 'conf':'ini', 'xml':'xml' };
                         editor.session.setMode(`ace/mode/${modeMap[ext] || 'text'}`);
@@ -296,7 +325,6 @@
         
         window.addEventListener('resize', () => { if(activeId && sessions[activeId]) sessions[activeId].fitAddon.fit(); });
 
-        // 双击发送获取文件请求
         window.openFile = function(filename) {
             if(!activeId || !sessions[activeId] || !sessions[activeId].ws) return;
             document.getElementById('currentFileName').innerText = filename;
