@@ -15,7 +15,6 @@ wss.on('connection', (ws, req) => {
     let sftpSession = null;
     let monitorInterval = null;
 
-    // 封装一个复用的发送目录树方法
     const sendDirTree = (sftp) => {
         sftp.readdir('/root', (err, list) => {
             if (!err) {
@@ -48,7 +47,7 @@ wss.on('connection', (ws, req) => {
                     sshClient.sftp((err, sftp) => {
                         if (err) return;
                         sftpSession = sftp; 
-                        sendDirTree(sftpSession); // 首次连接推送目录
+                        sendDirTree(sftpSession);
                     });
 
                     monitorInterval = setInterval(() => {
@@ -94,21 +93,19 @@ wss.on('connection', (ws, req) => {
                         if (err) ws.send(JSON.stringify({ type: 'SYSTEM_MSG', data: `\r\n\x1b[31m[System] 文件 ${cmd.filename} 保存失败: ${err.message}\x1b[0m\r\n` }));
                         else {
                             ws.send(JSON.stringify({ type: 'SYSTEM_MSG', data: `\r\n\x1b[32m[System] 📝 文件 ${cmd.filename} 成功保存！\x1b[0m\r\n` }));
-                            sendDirTree(sftpSession); // 保存后刷新目录大小等信息
+                            sendDirTree(sftpSession); 
                         }
                     });
                 }
-                // 【新增：处理新建文件请求】
                 else if (cmd.type === 'CREATE_FILE' && sftpSession) {
                     sftpSession.writeFile(`/root/${cmd.filename}`, '', 'utf8', (err) => {
                         if (err) ws.send(JSON.stringify({ type: 'SYSTEM_MSG', data: `\r\n\x1b[31m[System] 新建文件失败: ${err.message}\x1b[0m\r\n` }));
                         else {
                             ws.send(JSON.stringify({ type: 'SYSTEM_MSG', data: `\r\n\x1b[32m[System] 📄 成功创建文件: ${cmd.filename}\x1b[0m\r\n` }));
-                            sendDirTree(sftpSession); // 创建成功后，自动下发最新目录树
+                            sendDirTree(sftpSession); 
                         }
                     });
                 }
-                // 【新增：处理新建文件夹请求】
                 else if (cmd.type === 'CREATE_DIR' && sftpSession) {
                     sftpSession.mkdir(`/root/${cmd.dirname}`, (err) => {
                         if (err) ws.send(JSON.stringify({ type: 'SYSTEM_MSG', data: `\r\n\x1b[31m[System] 新建文件夹失败: ${err.message}\x1b[0m\r\n` }));
@@ -118,7 +115,37 @@ wss.on('connection', (ws, req) => {
                         }
                     });
                 }
-                // 【新增：处理手动刷新目录请求】
+                // 【新增：处理删除请求】
+                else if (cmd.type === 'DELETE_NODE' && sftpSession) {
+                    const targetPath = `/root/${cmd.filename}`;
+                    if (cmd.isDir) {
+                        sftpSession.rmdir(targetPath, (err) => {
+                            if (err) ws.send(JSON.stringify({ type: 'SYSTEM_MSG', data: `\r\n\x1b[31m[System] 删除文件夹失败 (可能非空): ${err.message}\x1b[0m\r\n` }));
+                            else {
+                                ws.send(JSON.stringify({ type: 'SYSTEM_MSG', data: `\r\n\x1b[32m[System] 🗑️ 成功删除文件夹: ${cmd.filename}\x1b[0m\r\n` }));
+                                sendDirTree(sftpSession);
+                            }
+                        });
+                    } else {
+                        sftpSession.unlink(targetPath, (err) => {
+                            if (err) ws.send(JSON.stringify({ type: 'SYSTEM_MSG', data: `\r\n\x1b[31m[System] 删除文件失败: ${err.message}\x1b[0m\r\n` }));
+                            else {
+                                ws.send(JSON.stringify({ type: 'SYSTEM_MSG', data: `\r\n\x1b[32m[System] 🗑️ 成功删除文件: ${cmd.filename}\x1b[0m\r\n` }));
+                                sendDirTree(sftpSession);
+                            }
+                        });
+                    }
+                }
+                // 【新增：处理重命名请求】
+                else if (cmd.type === 'RENAME_NODE' && sftpSession) {
+                    sftpSession.rename(`/root/${cmd.oldName}`, `/root/${cmd.newName}`, (err) => {
+                        if (err) ws.send(JSON.stringify({ type: 'SYSTEM_MSG', data: `\r\n\x1b[31m[System] 重命名失败: ${err.message}\x1b[0m\r\n` }));
+                        else {
+                            ws.send(JSON.stringify({ type: 'SYSTEM_MSG', data: `\r\n\x1b[32m[System] ✏️ 成功重命名: ${cmd.oldName} -> ${cmd.newName}\x1b[0m\r\n` }));
+                            sendDirTree(sftpSession);
+                        }
+                    });
+                }
                 else if (cmd.type === 'REFRESH_DIR' && sftpSession) {
                     sendDirTree(sftpSession);
                 }
@@ -135,4 +162,4 @@ wss.on('connection', (ws, req) => {
 });
 
 const PORT = process.env.PORT || 8080;
-server.listen(PORT, '0.0.0.0', () => console.log(`[Running] WebOS 集群终极版已点火，监听端口: ${PORT}`));
+server.listen(PORT, '0.0.0.0', () => console.log(`[Running] WebOS 集群全能版已点火，监听端口: ${PORT}`));
