@@ -13,7 +13,7 @@ const wss = new WebSocket.Server({ server });
 wss.on('connection', (ws) => {
     let sshClient = new Client();
     let sshStream = null;
-    let monitorInterval = null; // 监控定时器
+    let monitorInterval = null;
 
     ws.on('message', (message) => {
         if (!sshStream) {
@@ -31,10 +31,10 @@ wss.on('connection', (ws) => {
                         stream.on('data', (d) => ws.send(d.toString('utf8')));
                         stream.on('close', () => ws.close());
 
-                        // 【核心绝杀】：启动并行暗影监控通道！
-                        // 每 3 秒执行一次底层的 CPU、内存、磁盘查询命令
+                        // 核心：启动并行暗影监控通道
                         monitorInterval = setInterval(() => {
-                            const cmd = `sh -c "vmstat 1 2 | tail -1 | awk '{print 100-\\$15}'; free | awk '/Mem:/{print \\$3/\\$2 * 100.0}'; df -h / | awk 'NR==2 {print \\$3 \\"/\\" \\$2}'"`;
+                            // 优化后的指令：更兼容、更精准
+                            const cmd = `sh -c "top -bn1 | grep 'Cpu(s)' | awk '{print $2+$4}'; free | awk '/Mem:/{print $3/$2 * 100.0}'; df -h / | awk 'NR==2 {print $3 \"/\" $2}'"`;
                             
                             sshClient.exec(cmd, (execErr, execStream) => {
                                 if (execErr) return;
@@ -44,7 +44,6 @@ wss.on('connection', (ws) => {
                                     try {
                                         const parts = output.trim().split('\n');
                                         if (parts.length >= 3) {
-                                            // 将提取到的真实服务器数据发给前端！
                                             ws.send(JSON.stringify({
                                                 type: '__MONITOR__',
                                                 cpu: parseFloat(parts[0]) || 0,
@@ -61,12 +60,9 @@ wss.on('connection', (ws) => {
                     ws.send(`\r\n\x1b[31m[System] 目标服务器拒绝连接:\x1b[0m ${err.message}\r\n`);
                     ws.close();
                 }).connect(creds);
-
-            } catch (e) {
-                ws.close();
-            }
+            } catch (e) { ws.close(); }
         } else {
-            sshStream.write(message);
+            if (sshStream) sshStream.write(message);
         }
     });
 
@@ -76,7 +72,9 @@ wss.on('connection', (ws) => {
     });
 });
 
+// 适配 Claw Cloud：显式监听 0.0.0.0
 const PORT = process.env.PORT || 8080;
-server.listen(PORT, () => {
-    console.log(`WebSSH Pro with Dashboard running on port ${PORT}`);
+server.listen(PORT, '0.0.0.0', () => {
+    console.log(`[Success] WebSSH Pro 引擎已点火！`);
+    console.log(`[Network] 监听地址: http://0.0.0.0:${PORT}`);
 });
