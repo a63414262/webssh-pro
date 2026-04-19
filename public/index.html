@@ -33,7 +33,6 @@
         .server-item .close-btn { color: #555; font-weight: bold; }
         .server-item .close-btn:hover { color: var(--danger); }
 
-        /* 文件操作按钮组 */
         .file-actions span { cursor: pointer; margin-left: 8px; transition: 0.2s; opacity: 0.7; }
         .file-actions span:hover { opacity: 1; color: var(--accent); }
 
@@ -158,25 +157,17 @@
             }, 500);
         };
 
-        // ================= 【核心新增】：文件与目录管理功能 =================
         window.createNode = function(type) {
             if(!activeId || !sessions[activeId] || !sessions[activeId].ws) return alert('请先连接并选择一个活跃节点');
-            
             const name = prompt(`请输入新${type === 'file' ? '文件' : '文件夹'}名称：`);
             if(!name || name.trim() === '') return;
-            
-            if(type === 'file') {
-                sessions[activeId].ws.send(JSON.stringify({ type: 'CREATE_FILE', filename: name.trim() }));
-            } else {
-                sessions[activeId].ws.send(JSON.stringify({ type: 'CREATE_DIR', dirname: name.trim() }));
-            }
+            if(type === 'file') sessions[activeId].ws.send(JSON.stringify({ type: 'CREATE_FILE', filename: name.trim() }));
+            else sessions[activeId].ws.send(JSON.stringify({ type: 'CREATE_DIR', dirname: name.trim() }));
         };
 
         window.refreshDir = function() {
             if(!activeId || !sessions[activeId] || !sessions[activeId].ws) return;
             sessions[activeId].ws.send(JSON.stringify({ type: 'REFRESH_DIR' }));
-            
-            // 给刷新按钮一个小反馈
             const fileHost = document.getElementById('currentFileHost');
             const originalText = fileHost.innerText;
             fileHost.innerText = 'Refreshed!';
@@ -188,11 +179,35 @@
         const gaugeChart = echarts.init(document.getElementById('gaugeChart'), 'dark');
         const netChart = echarts.init(document.getElementById('netChart'), 'dark');
         
+        // ================= 【核心修复】：UI 不重叠的精美环形仪表盘配置 =================
         function resetCharts() {
-            gaugeChart.setOption({ series: [
-                { type: 'gauge', center: ['25%', '50%'], radius: '80%', progress: { show: true, width: 8 }, axisLine: { lineStyle: { width: 8 } }, axisTick: { show: false }, splitLine: { show: false }, axisLabel: { show: false }, pointer: { show: false }, detail: { valueAnimation: true, fontSize: 14, color: '#fff', formatter: '{value}%' }, data: [{ value: 0, name: 'CPU' }], title: { fontSize: 12, offsetCenter: [0, '80%'] } },
-                { type: 'gauge', center: ['75%', '50%'], radius: '80%', progress: { show: true, width: 8, itemStyle: { color: '#007acc' } }, axisLine: { lineStyle: { width: 8 } }, axisTick: { show: false }, splitLine: { show: false }, axisLabel: { show: false }, pointer: { show: false }, detail: { valueAnimation: true, fontSize: 14, color: '#fff', formatter: '{value}%' }, data: [{ value: 0, name: 'RAM' }], title: { fontSize: 12, offsetCenter: [0, '80%'] } }
-            ]});
+            gaugeChart.setOption({
+                backgroundColor: 'transparent',
+                series: [
+                    { 
+                        type: 'gauge', 
+                        center: ['25%', '45%'], // 向上挪一点，给底部文字留空间
+                        radius: '65%', // 【修复点】：缩小半径，告别重叠！
+                        progress: { show: true, width: 6 }, // 稍微调细一点线条，更精致
+                        axisLine: { lineStyle: { width: 6 } }, 
+                        axisTick: { show: false }, splitLine: { show: false }, axisLabel: { show: false }, pointer: { show: false }, 
+                        detail: { valueAnimation: true, fontSize: 16, color: '#fff', formatter: '{value}%', offsetCenter: [0, '15%'] }, // 文字稍微靠下一点
+                        data: [{ value: 0, name: 'CPU' }], 
+                        title: { fontSize: 12, offsetCenter: [0, '90%'], color: '#888' } // 标题沉底
+                    },
+                    { 
+                        type: 'gauge', 
+                        center: ['75%', '45%'], 
+                        radius: '65%', 
+                        progress: { show: true, width: 6, itemStyle: { color: '#007acc' } }, 
+                        axisLine: { lineStyle: { width: 6 } }, 
+                        axisTick: { show: false }, splitLine: { show: false }, axisLabel: { show: false }, pointer: { show: false }, 
+                        detail: { valueAnimation: true, fontSize: 16, color: '#fff', formatter: '{value}%', offsetCenter: [0, '15%'] }, 
+                        data: [{ value: 0, name: 'RAM' }], 
+                        title: { fontSize: 12, offsetCenter: [0, '90%'], color: '#888' } 
+                    }
+                ]
+            });
             netChart.setOption({
                 grid: { left: 30, right: 10, bottom: 20, top: 40 }, xAxis: { type: 'category', boundaryGap: false, data: Array(20).fill(''), show: false }, yAxis: { type: 'value', splitLine: { lineStyle: { color: '#2c3c31' } } }, series: [{ type: 'line', data: Array(20).fill(0), areaStyle: { color: 'rgba(0, 255, 102, 0.2)' }, itemStyle: { color: '#00ff66' }, smooth: true }]
             });
@@ -250,7 +265,6 @@
                 else if (packet.type === 'SFTP_TREE') {
                     sessions[id].filesHTML = packet.files.map(f => {
                         const icon = f.isDir ? '<span class="icon-dir">📁</span>' : '<span class="icon-file">📄</span>';
-                        // 如果是文件夹，双击事件可以留空或者以后用来进入目录，目前仅对文件打开编辑器
                         const dblclick = f.isDir ? '' : `ondblclick="openFile('${f.name}')"`;
                         return `<div class="file-item" onclick="selectFileDom(this)" ${dblclick}>${icon} ${f.name}</div>`;
                     }).join('');
