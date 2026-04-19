@@ -175,7 +175,8 @@
                 // 不是监控数据，才是真实的终端输出内容
                 term.write(data);
                 
-                if (data.includes('[System] 🚀 成功打穿终端')) {
+                // 【修改点】：去掉了 "[System]"，避开了隐藏的 ANSI 转义字符的干扰
+                if (data.includes('🚀 成功打穿终端')) {
                     document.getElementById('connectModal').classList.add('hide'); // 隐藏登录框
                 }
             };
