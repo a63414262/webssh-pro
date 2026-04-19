@@ -203,8 +203,10 @@
 
             term.writeln('\x1b[33m[Engine]\x1b[0m 向集群分配节点中...');
 
-            // 3. 建立独立 WebSocket 隧道
-            const ws = new WebSocket(window.location.protocol === 'https:' ? 'wss://' : 'ws://' + window.location.host + '/');
+            // ================= 核心修复：WebSocket URL 拼接逻辑 =================
+            const protocol = window.location.protocol === 'https:' ? 'wss://' : 'ws://';
+            const wsUrl = protocol + window.location.host + '/';
+            const ws = new WebSocket(wsUrl);
             sessions[id].ws = ws;
 
             term.onData(data => { if(ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'TERMINAL_INPUT', data })); });
@@ -239,8 +241,12 @@
                 }
             };
 
-            ws.onclose = () => { term.writeln('\r\n\x1b[31m[System]\x1b[0m 节点连接断开。'); };
-            ws.onerror = () => { term.writeln('\r\n\x1b[31m[System]\x1b[0m WebSocket 隧道建立失败。'); };
+            ws.onclose = () => { 
+                term.writeln('\r\n\x1b[31m[System]\x1b[0m 节点连接断开。'); 
+            };
+            ws.onerror = () => { 
+                term.writeln('\r\n\x1b[31m[System]\x1b[0m WebSocket 隧道建立失败，请检查 F12 控制台报错。'); 
+            };
 
             // 切换到新节点
             switchSession(id);
