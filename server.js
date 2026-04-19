@@ -19,13 +19,10 @@ wss.on('connection', (ws, req) => {
         if (!sshStream) {
             try {
                 const creds = JSON.parse(message);
-                
-                // 开启允许交互式密码尝试，设置超时
                 creds.tryKeyboard = true; 
                 creds.readyTimeout = 20000;
 
                 sshClient.on('ready', () => {
-                    // 1. 点火终端引擎
                     sshClient.shell({ term: 'xterm-256color' }, (err, stream) => {
                         if (err) return ws.close();
                         sshStream = stream;
@@ -34,10 +31,9 @@ wss.on('connection', (ws, req) => {
                         stream.on('close', () => ws.close());
                     });
 
-                    // 2. 点火 SFTP 文件引擎 (读取 /root 目录)
                     sshClient.sftp((err, sftp) => {
                         if (err) return;
-                        sftpSession = sftp; // 挂载 SFTP 实例
+                        sftpSession = sftp; 
                         sftp.readdir('/root', (err, list) => {
                             if (!err) {
                                 const files = list.map(item => ({
@@ -50,7 +46,6 @@ wss.on('connection', (ws, req) => {
                         });
                     });
 
-                    // 3. 点火高精监控引擎
                     monitorInterval = setInterval(() => {
                         const cmd = `sh -c "top -bn1 | grep 'Cpu(s)' | awk '{print \\$2+\\$4}'; free | awk '/Mem:/{print \\$3/\\$2 * 100.0}'; cat /proc/net/dev | grep eth0 | awk '{print \\$2, \\$10}'"`;
                         sshClient.exec(cmd, (e, exStream) => {
@@ -60,18 +55,12 @@ wss.on('connection', (ws, req) => {
                             exStream.on('close', () => {
                                 const p = out.trim().split('\n');
                                 if (p.length >= 2) {
-                                    ws.send(JSON.stringify({ 
-                                        type: 'MONITOR', 
-                                        cpu: parseFloat(p[0]) || 0, 
-                                        mem: parseFloat(p[1]) || 0, 
-                                        net: Math.floor(Math.random() * 500) // 模拟网速波动
-                                    }));
+                                    ws.send(JSON.stringify({ type: 'MONITOR', cpu: parseFloat(p[0]) || 0, mem: parseFloat(p[1]) || 0, net: Math.floor(Math.random() * 500) }));
                                 }
                             });
                         });
                     }, 2000);
                 })
-                // 应对现代 Linux 强制 Keyboard-interactive 认证
                 .on('keyboard-interactive', (name, instructions, instructionsLang, prompts, finish) => {
                     if (prompts.length > 0 && prompts[0].prompt.toLowerCase().includes('password')) finish([creds.password]);
                     else finish([]);
@@ -84,15 +73,11 @@ wss.on('connection', (ws, req) => {
                 }).connect(creds);
             } catch (e) { ws.close(); }
         } else {
-            // 命令路由分发
             try {
                 const cmd = JSON.parse(message);
-                
-                // 处理终端输入
                 if (cmd.type === 'TERMINAL_INPUT' && sshStream) {
                     sshStream.write(cmd.data);
                 } 
-                // 处理前端读取文件请求
                 else if (cmd.type === 'READ_FILE' && sftpSession) {
                     sftpSession.readFile(`/root/${cmd.filename}`, 'utf8', (err, data) => {
                         if (err) {
@@ -102,8 +87,17 @@ wss.on('connection', (ws, req) => {
                         }
                     });
                 }
+                // 【核心新增逻辑】：接收前端的保存指令并写入服务器
+                else if (cmd.type === 'WRITE_FILE' && sftpSession) {
+                    sftpSession.writeFile(`/root/${cmd.filename}`, cmd.content, 'utf8', (err) => {
+                        if (err) {
+                            ws.send(JSON.stringify({ type: 'SYSTEM_MSG', data: `\r\n\x1b[31m[System] 文件 ${cmd.filename} 保存失败: ${err.message}\x1b[0m\r\n` }));
+                        } else {
+                            ws.send(JSON.stringify({ type: 'SYSTEM_MSG', data: `\r\n\x1b[32m[System] 📝 文件 ${cmd.filename} 成功保存至服务器！\x1b[0m\r\n` }));
+                        }
+                    });
+                }
             } catch(e) { 
-                // 回退机制：如果是纯文本，直接塞给终端
                 if (sshStream) sshStream.write(message); 
             }
         }
@@ -116,4 +110,4 @@ wss.on('connection', (ws, req) => {
 });
 
 const PORT = process.env.PORT || 8080;
-server.listen(PORT, '0.0.0.0', () => console.log(`[Running] WebOS 集群最终版已点火，监听端口: ${PORT}`));
+server.listen(PORT, '0.0.0.0', () => console.log(`[Running] WebOS 集群终极版已点火，监听端口: ${PORT}`));
