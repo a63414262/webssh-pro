@@ -3,187 +3,148 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>WebSSH Pro | 动态仪表盘版</title>
+    <title>WebSSH | Ultimate OS</title>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css" />
     <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
     <style>
-        :root {
-            --bg-body: #0c0c0c; --panel-bg: #1e1e1e; --border-color: #333;
-            --active-accent: #007acc; --hint-accent: #0f0; --text-main: #f0f0f0;
-            --text-muted: #888; --font-main: 'Segoe UI', 'Consolas', monospace;
-        }
-        body { background-color: var(--bg-body); margin: 0; font-family: var(--font-main); color: var(--text-main); overflow: hidden; height: 100vh; display: flex; flex-direction: column; }
-        * { box-sizing: border-box; border-radius: 4px; }
-        .app-header { background: var(--panel-bg); border-bottom: 1px solid var(--border-color); display: flex; align-items: center; justify-content: space-between; height: 40px; padding: 0 10px; z-index: 10;}
-        .app-header .logo { font-size: 14px; font-weight: bold; }
-        .app-body { flex: 1; display: flex; background: var(--bg-body); position: relative; }
-        .sidebar-left { width: 140px; background: var(--panel-bg); border-right: 1px solid var(--border-color); padding: 10px; display: flex; flex-direction: column; gap: 5px; }
-        .sidebar-left h4 { margin: 0 0 10px 0; font-size: 13px; color: #666; font-weight: normal; }
-        .server-item { padding: 6px 10px; font-size: 13px; color: var(--text-muted); cursor: pointer; transition: 0.2s; white-space: nowrap;}
-        .server-item.active { background: rgba(0,122,204,0.3); color: #fff; }
-        .main-content { flex: 1; display: flex; flex-direction: column; position: relative; border-right: 1px solid var(--border-color); }
-        #terminalWrapper { flex: 1; display: flex; overflow: hidden; padding: 5px;}
-        #terminal { flex: 1; }
+        :root { --bg: #1e1e1e; --panel: #252526; --border: #333; --text: #ccc; }
+        body { margin: 0; background: var(--bg); color: var(--text); font-family: Consolas, monospace; height: 100vh; overflow: hidden; display: flex; flex-direction: column; }
+        .header { height: 40px; background: #333; display: flex; align-items: center; padding: 0 15px; font-weight: bold; color: #fff; }
+        .desktop { flex: 1; display: grid; grid-template-columns: 200px 1fr 250px; overflow: hidden; }
         
-        /* 连接表单 Modal */
-        #connectModal { background: rgba(0,0,0,0.8); position: absolute; left: 0; top: 0; width: 100%; height: 100%; z-index: 100; display: flex; align-items: center; justify-content: center; transition: 0.3s; }
-        #connectModal.hide { visibility: hidden; opacity: 0; pointer-events: none;}
-        .connect-form { background: var(--panel-bg); border: 1px solid var(--border-color); padding: 25px; display: grid; gap: 12px; width: 420px; box-shadow: 0 10px 40px rgba(0,0,0,0.8);}
-        .input-row { display: grid; grid-template-columns: 1fr 60px; gap: 10px; }
-        input, textarea { background: #262626; color: var(--text-main); border: 1px solid #444; padding: 8px 10px; border-radius: 4px; outline: none; width: 100%; font-family: monospace;}
-        textarea { height: 70px; resize: vertical;}
-        #connectBtn { background: var(--active-accent); color: #fff; border: none; padding: 10px; cursor: pointer; font-weight: bold; width: 100%; margin-top: 5px;}
+        /* 模块面板基础样式 */
+        .panel { background: var(--panel); border: 1px solid var(--border); display: flex; flex-direction: column; overflow: hidden; }
+        .panel-title { padding: 5px 10px; font-size: 12px; background: #2d2d2d; border-bottom: 1px solid var(--border); color: #888; }
         
-        /* 动态系统监控区 */
-        .sidebar-right { width: 180px; background: var(--panel-bg); padding: 15px; display: flex; flex-direction: column; gap: 15px; }
-        .sidebar-right h4 { margin: 0 0 10px 0; font-size: 13px; color: #666; font-weight: normal; border-bottom: 1px solid #333; padding-bottom: 5px; }
-        .gauges-box { display: flex; gap: 10px; justify-content: space-between; }
-        .gauge-item { width: 47%; text-align: center; background: #222; border: 1px solid var(--border-color); padding: 8px 0; border-radius: 4px; }
-        .gauge-label { font-size: 12px; color: var(--text-muted); margin-bottom: 5px; }
+        /* 左侧文件树 */
+        #fileManager { padding: 10px; font-size: 13px; overflow-y: auto; color: #d4d4d4; }
+        .file-item { padding: 4px; cursor: pointer; border-bottom: 1px solid #333; }
+        .file-item:hover { background: #2a2d2e; }
+
+        /* 中部区域分屏 */
+        .main-area { display: grid; grid-template-rows: 1fr 1fr; gap: 2px; background: var(--bg); }
+        #editorArea { padding: 10px; font-size: 14px; color: #9cdcfe; } /* Monaco 预留位 */
+        #terminalWrapper { padding: 5px; background: #000; }
         
-        /* 核心：动态 SVG 仪表盘 */
-        .gauge-shell { position: relative; width: 66px; height: 33px; margin: 0 auto; overflow: hidden; }
-        .gauge-svg { transform: rotate(-90deg); width: 66px; height: 66px; position: absolute; left: 0; top: 0; }
-        .gauge-path-bg { fill: none; stroke: #333; stroke-width: 4; }
-        .gauge-path-fill { fill: none; stroke: #555; stroke-width: 4; stroke-dasharray: 73 73; stroke-dashoffset: 73; transition: stroke-dashoffset 1s ease-out, stroke 0.5s; stroke-linecap: round; }
-        .gauge-value-abs { position: absolute; left: 0; top: 15px; width: 100%; height: 100%; text-align: center; font-size: 14px; font-weight: bold; color: #fff; font-family: monospace; }
-        
-        .pro-info { font-size: 12px; color: #888; display: grid; gap: 8px; margin-top: 10px;}
-        .info-row { display: flex; justify-content: space-between; border-bottom: 1px solid #222; padding-bottom: 3px;}
-        .info-row strong { color: #bbb; }
+        /* 右侧仪表盘 */
+        .dashboard { padding: 10px; overflow-y: auto; }
+        .chart-box { height: 150px; width: 100%; margin-bottom: 15px; }
+
+        /* 极简登录层 */
+        #loginOverlay { position: absolute; inset: 0; background: rgba(0,0,0,0.9); display: flex; justify-content: center; align-items: center; z-index: 999; }
+        .login-box { display: flex; gap: 10px; }
+        input { background: #333; color: #fff; border: 1px solid #555; padding: 8px; border-radius: 4px;}
+        button { background: #007acc; color: #fff; border: none; padding: 8px 15px; cursor: pointer; font-weight: bold; border-radius: 4px;}
     </style>
 </head>
 <body>
-    <header class="app-header">
-        <div class="logo">🚀 H terminals (Pro)</div>
-        <div style="font-size: 12px; color: #888;">全栈监控版</div>
-    </header>
+    <div id="loginOverlay">
+        <div class="login-box">
+            <input type="text" id="host" placeholder="IP" value="127.0.0.1">
+            <input type="text" id="user" placeholder="Root" value="root">
+            <input type="password" id="pass" placeholder="Password">
+            <button onclick="connect()">Connect Engine</button>
+        </div>
+    </div>
 
-    <main class="app-body">
-        <aside class="sidebar-left">
-            <h4>服务器管理</h4>
-            <div class="server-item active">● 本次直连</div>
-        </aside>
+    <div class="header">🚀 OS Terminal (Framework Mode)</div>
+    
+    <div class="desktop">
+        <div class="panel">
+            <div class="panel-title">/root 资源管理器 (SFTP)</div>
+            <div id="fileManager">等待连接数据...</div>
+        </div>
 
-        <section class="main-content">
-            <div id="terminalWrapper"><div id="terminal"></div></div>
-            
-            <div id="connectModal">
-                <div class="connect-form">
-                    <h3 style="margin:0;color:#fff;">连接并挂载监控面板</h3>
-                    <div class="input-row">
-                        <input type="text" id="hostInput" placeholder="请输入公网 IP 地址" />
-                        <input type="text" id="portInput" value="22" />
-                    </div>
-                    <input type="text" id="userInput" value="root" placeholder="用户名"/>
-                    <input type="password" id="passInput" placeholder="密码 (或私钥密码)"/>
-                    <textarea id="keyInput" placeholder="在此粘贴私钥 (-----BEGIN OPENSSH PRIVATE KEY-----)
-留空则使用上方密码登录"></textarea>
-                    <button id="connectBtn">🚀 启动引擎并打通监控流</button>
-                </div>
+        <div class="main-area">
+            <div class="panel" style="border-bottom: 2px solid #007acc;">
+                <div class="panel-title">Editor / Preview (Monaco 预留位)</div>
+                <div id="editorArea">// [准备就绪] 后续可在此挂载 Monaco Editor 渲染远端代码文件...</div>
             </div>
-        </section>
+            <div class="panel">
+                <div class="panel-title">Terminal</div>
+                <div id="terminalWrapper" style="flex:1;"></div>
+            </div>
+        </div>
 
-        <aside class="sidebar-right">
-            <h4>实时系统状态</h4>
-            <div class="gauges-box">
-                <div class="gauge-item">
-                    <div class="gauge-label">CPU</div>
-                    <div class="gauge-shell">
-                        <svg class="gauge-svg" viewBox="0 0 66 66"><path class="gauge-path-bg" d="M10 33 A 23 23 0 0 1 56 33"/><path id="gauge-fill-cpu" class="gauge-path-fill" d="M10 33 A 23 23 0 0 1 56 33"/></svg>
-                        <div class="gauge-value-abs" id="gauge-val-cpu">--</div>
-                    </div>
-                </div>
-                <div class="gauge-item">
-                    <div class="gauge-label">内存</div>
-                    <div class="gauge-shell">
-                        <svg class="gauge-svg" viewBox="0 0 66 66"><path class="gauge-path-bg" d="M10 33 A 23 23 0 0 1 56 33"/><path id="gauge-fill-mem" class="gauge-path-fill" d="M10 33 A 23 23 0 0 1 56 33"/></svg>
-                        <div class="gauge-value-abs" id="gauge-val-mem">--</div>
-                    </div>
-                </div>
-            </div>
-            
-            <div class="pro-info">
-                <div class="info-row">系统挂载盘: <strong id="disk-val">--/--</strong></div>
-                <div class="info-row">WebSSH 状态: <strong style="color:#0f0;">Running</strong></div>
-            </div>
-        </aside>
-    </main>
+        <div class="panel dashboard">
+            <div class="panel-title">系统状态 (ECharts)</div>
+            <div id="cpuChart" class="chart-box"></div>
+            <div id="netChart" class="chart-box"></div>
+        </div>
+    </div>
 
     <script>
-        const term = new Terminal({ cursorBlink: true, theme: { background: '#0c0c0c' }});
+        // 初始化 Terminal
+        const term = new Terminal({ cursorBlink: true, theme: { background: '#000' }});
         const fitAddon = new FitAddon.FitAddon();
         term.loadAddon(fitAddon);
-        term.open(document.getElementById('terminal'));
-        setTimeout(() => fitAddon.fit(), 100);
-        window.addEventListener('resize', () => fitAddon.fit());
+        term.open(document.getElementById('terminalWrapper'));
+        setTimeout(() => fitAddon.fit(), 200);
+        window.onresize = () => fitAddon.fit();
+
+        // 初始化 ECharts (以CPU多核雷达图为例)
+        const cpuChart = echarts.init(document.getElementById('cpuChart'), 'dark');
+        cpuChart.setOption({
+            backgroundColor: 'transparent',
+            title: { text: 'CPU Cores', textStyle: { fontSize: 12, color: '#888' } },
+            xAxis: { type: 'category', data: ['Core1', 'Core2', 'Core3', 'Core4'], show: false },
+            yAxis: { type: 'value', max: 100, show: false },
+            series: [{ type: 'bar', data: [0,0,0,0], itemStyle: { color: '#0f0' } }]
+        });
+
+        const netChart = echarts.init(document.getElementById('netChart'), 'dark');
+        netChart.setOption({
+            backgroundColor: 'transparent',
+            title: { text: 'Network Traffic', textStyle: { fontSize: 12, color: '#888' } },
+            xAxis: { type: 'category', data: ['','','','',''] },
+            yAxis: { type: 'value', show: false },
+            series: [{ type: 'line', data: [0,0,0,0,0], areaStyle: {}, smooth: true }]
+        });
+        let netData = [0,0,0,0,0];
 
         let ws = null;
-        term.onData(data => { if (ws && ws.readyState === WebSocket.OPEN) ws.send(data); });
 
-        // 【最核心的 UI 动画引擎】：更新仪表盘
-        function updateGauge(id, percent) {
-            // 半圆的路径长度约为 73。满载是 0，空载是 73
-            const offset = 73 - (percent / 100) * 73;
-            const fillElement = document.getElementById(`gauge-fill-${id}`);
-            fillElement.style.strokeDashoffset = offset;
-            document.getElementById(`gauge-val-${id}`).innerText = Math.round(percent) + '%';
+        function connect() {
+            document.getElementById('loginOverlay').style.display = 'none';
+            ws = new WebSocket(window.location.protocol === 'https:' ? 'wss://' : 'ws://' + window.location.host + '/');
             
-            // 变色逻辑：超 60% 变黄，超 85% 变红
-            let color = '#0f0'; // 绿色
-            if (percent > 60) color = '#d19a66'; // 黄色
-            if (percent > 85) color = '#e06c75'; // 红色
-            fillElement.style.stroke = color;
-        }
-
-        document.getElementById('connectBtn').onclick = () => {
-            const host = document.getElementById('hostInput').value.trim();
-            const port = document.getElementById('portInput').value.trim() || '22';
-            const username = document.getElementById('userInput').value.trim() || 'root';
-            const password = document.getElementById('passInput').value;
-            const privateKey = document.getElementById('keyInput').value.trim();
-            
-            if (!host) { alert("请输入 IP！"); return; }
-            term.reset();
-            term.writeln('\x1b[33m[System]\x1b[0m 正在部署后端监控钩子并建立通道...');
-
-            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-            ws = new WebSocket(protocol + '//' + window.location.host + '/');
+            term.onData(data => { 
+                if(ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({type: 'TERMINAL_INPUT', data})); 
+            });
 
             ws.onopen = () => {
-                const creds = { host, port: parseInt(port), username, readyTimeout: 20000 };
-                if (privateKey) { creds.privateKey = privateKey; if (password) creds.passphrase = password; } 
-                else { creds.password = password; }
-                ws.send(JSON.stringify(creds));
+                ws.send(JSON.stringify({
+                    host: document.getElementById('host').value,
+                    port: 22,
+                    username: document.getElementById('user').value,
+                    password: document.getElementById('pass').value
+                }));
             };
 
-            ws.onmessage = async (event) => {
-                let data = event.data instanceof Blob ? await event.data.text() : event.data;
+            ws.onmessage = (e) => {
+                const packet = JSON.parse(e.data);
                 
-                // 【核心拦截】：如果发现是后台发来的暗影监控数据，拦截它渲染 UI，绝不打印到终端里！
-                try {
-                    if (typeof data === 'string' && data.startsWith('{"type":"__MONITOR__"')) {
-                        const stats = JSON.parse(data);
-                        updateGauge('cpu', stats.cpu);
-                        updateGauge('mem', stats.mem);
-                        if (stats.disk) document.getElementById('disk-val').innerText = stats.disk;
-                        return; // 拦截完毕，直接退出
-                    }
-                } catch(e) {}
-
-                // 不是监控数据，才是真实的终端输出内容
-                term.write(data);
-                
-                // 【修改点】：去掉了 "[System]"，避开了隐藏的 ANSI 转义字符的干扰
-                if (data.includes('🚀 成功打穿终端')) {
-                    document.getElementById('connectModal').classList.add('hide'); // 隐藏登录框
+                // 数据路由分发机制 (全新架构)
+                switch(packet.type) {
+                    case 'SYSTEM':
+                    case 'TERMINAL':
+                        term.write(packet.data || packet.msg);
+                        break;
+                    case 'SFTP_INIT':
+                        // 渲染左侧文件树
+                        document.getElementById('fileManager').innerHTML = packet.files.map(f => `<div class="file-item">📄 ${f}</div>`).join('');
+                        break;
+                    case 'MONITOR':
+                        // 动态更新右侧 ECharts
+                        cpuChart.setOption({ series: [{ data: packet.cpuCores }]});
+                        netData.shift(); netData.push(packet.netDown);
+                        netChart.setOption({ series: [{ data: netData }]});
+                        break;
                 }
             };
-
-            ws.onclose = () => { term.writeln('\r\n\x1b[31m[System]\x1b[0m 管道已断开。'); document.getElementById('connectModal').classList.remove('hide'); };
-            ws.onerror = () => { term.writeln('\r\n\x1b[31m[System]\x1b[0m 建立隧道失败。'); document.getElementById('connectModal').classList.remove('hide'); };
-        };
+        }
     </script>
 </body>
 </html>
