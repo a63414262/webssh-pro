@@ -1,11 +1,16 @@
-name: Docker Build and Publish 🚀
+name: Build and Push to GHCR 🚀
 
-# 触发条件：当代码 push 到 main 分支，或者发布新的 Release 时触发
+# 触发条件：当你 push 代码到 main 分支，或者发布 Release 时触发
 on:
   push:
     branches: [ "main" ]
   release:
     types: [published]
+
+# 【核心魔法】：给 GitHub 自动生成的 Token 赋予读取代码和写入镜像包的权限
+permissions:
+  contents: read
+  packages: write
 
 jobs:
   build-and-push:
@@ -16,28 +21,30 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 2. 配置 Docker 构建环境 (支持多架构构建的基石)
+      # 2. 配置 Docker 构建环境
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      # 3. 登录到 Docker Hub
-      - name: Log in to Docker Hub
+      # 3. 免密登录到 GitHub Container Registry (GHCR)
+      - name: Log in to GitHub Container Registry
         uses: docker/login-action@v3
         with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
-      # 4. 提取动态 Tag (如果是 main 分支就是 latest，如果是 Release 就是对应的版本号)
-      - name: Extract metadata (tags, labels) for Docker
+      # 4. 自动提取动态 Tag (main分支=latest，Release=版本号)
+      # ${{ github.repository }} 会自动解析为你的 a63414262/webssh-pro
+      - name: Extract metadata (tags, labels)
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ secrets.DOCKERHUB_USERNAME }}/webssh-master-os
+          images: ghcr.io/${{ github.repository }}
           tags: |
             type=raw,value=latest,enable=${{ github.ref == format('refs/heads/{0}', 'main') }}
             type=ref,event=tag
 
-      # 5. 构建并推送镜像到 Docker Hub
+      # 5. 构建并推送到 GHCR
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
         with:
@@ -45,6 +52,6 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          # 开启缓存机制，让下一次构建速度飞起
+          # 开启 GitHub 专属构建缓存，下次打包速度起飞
           cache-from: type=gha
           cache-to: type=gha,mode=max
