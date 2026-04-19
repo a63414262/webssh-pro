@@ -1,11 +1,4 @@
 ````markdown
-# 🚀 WebSSH Master OS (集群终极版)
-
-![License](https://img.shields.io/badge/license-MIT-blue.svg)
-![Version](https://img.shields.io/badge/version-3.1.0%20Pro-green.svg)
-![Node](https://img.shields.io/badge/node-%3E%3D%2014.0.0-brightgreen.svg)
-![Status](https://img.shields.io/badge/build-passing-brightgreen.svg)
-
 **WebSSH Master OS** 是一个基于 Node.js 的全栈 Serverless WebSSH 客户端与服务器集群管理面板。采用前后端一体化 (All-in-One) 架构，极简部署，瞬间点火。
 
 它不仅仅是一个终端工具，更是一个运行在浏览器里的**迷你云端操作系统**。通过特殊的“暗影监控通道”和“多路复用状态机”，彻底颠覆传统的 WebSSH 体验。
