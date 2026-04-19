@@ -24,7 +24,6 @@
         .add-btn { cursor: pointer; color: var(--accent); background: rgba(0,255,102,0.1); padding: 2px 8px; border-radius: 4px; border: 1px solid var(--accent); transition: 0.2s;}
         .add-btn:hover { background: var(--accent); color: #000; }
 
-        /* 服务器集群列表 */
         #serverList { max-height: 30%; overflow-y: auto; border-bottom: 2px solid var(--border); background: #111813;}
         .server-item { padding: 8px 15px; font-size: 12px; cursor: pointer; display: flex; justify-content: space-between; align-items: center; border-left: 3px solid transparent; transition: 0.2s;}
         .server-item:hover { background: rgba(255,255,255,0.05); }
@@ -32,25 +31,21 @@
         .server-item .close-btn { color: #555; font-weight: bold; }
         .server-item .close-btn:hover { color: var(--danger); }
 
-        /* 文件树 */
         #fileManager { flex: 1; overflow-y: auto; padding: 5px; font-size: 13px; }
-        .file-item { padding: 6px 10px; cursor: pointer; border-radius: 4px; display: flex; align-items: center; gap: 8px; }
+        .file-item { padding: 6px 10px; cursor: pointer; border-radius: 4px; display: flex; align-items: center; gap: 8px; user-select: none; }
         .file-item:hover { background: rgba(0, 255, 102, 0.1); color: var(--accent); }
         .icon-dir { color: #dcb67a; }
         .icon-file { color: #888; }
 
-        /* 中部双分屏 */
         .main-area { display: grid; grid-template-rows: 50% 50%; border-right: 1px solid var(--border); }
         .editor-container { position: relative; width: 100%; height: 100%; overflow: hidden; }
         #terminalsContainer { flex: 1; position: relative; background: #000; overflow: hidden; }
         .terminal-wrapper { position: absolute; inset: 0; padding: 5px 10px; display: none; }
         .terminal-wrapper.active { display: block; }
         
-        /* 仪表盘 */
         .dashboard { padding: 15px; overflow-y: auto; display: flex; flex-direction: column; gap: 20px;}
         .chart-box { height: 180px; width: 100%; }
 
-        /* 极客风登录框 */
         #loginOverlay { position: absolute; inset: 0; background: rgba(0,0,0,0.85); backdrop-filter: blur(5px); display: flex; justify-content: center; align-items: center; z-index: 999; transition: opacity 0.3s; }
         .login-box { background: #161e18; border: 1px solid var(--accent); padding: 30px; width: 400px; border-radius: 8px; box-shadow: 0 0 30px rgba(0,255,102,0.1); display: grid; gap: 15px; }
         input, textarea { background: #0a120c; color: #fff; border: 1px solid #3c4c41; padding: 10px; border-radius: 4px; font-family: monospace; outline: none;}
@@ -85,31 +80,20 @@
     
     <div class="desktop">
         <div class="panel">
-            <div class="panel-title">
-                <span>🌐 节点集群</span> 
-                <span class="add-btn" onclick="showLoginBox()">+ Add</span>
-            </div>
-            <div id="serverList">
-                </div>
-
-            <div class="panel-title" style="border-top: 1px solid var(--border);">
-                <span>📁 /root (<span id="currentFileHost">None</span>)</span> 
-                <span>🔄</span>
-            </div>
-            <div id="fileManager" style="color:#666; text-align:center; padding-top:20px;">
-                未选择活跃节点
-            </div>
+            <div class="panel-title"><span>🌐 节点集群</span> <span class="add-btn" onclick="showLoginBox()">+ Add</span></div>
+            <div id="serverList"></div>
+            <div class="panel-title" style="border-top: 1px solid var(--border);"><span>📁 /root (<span id="currentFileHost">None</span>)</span> <span>🔄</span></div>
+            <div id="fileManager" style="color:#666; text-align:center; padding-top:20px;">未选择活跃节点</div>
         </div>
 
         <div class="main-area">
             <div class="panel" style="border-bottom: 2px solid var(--border);">
-                <div class="panel-title"><span>📝 Code Editor (Monaco)</span> <span>Save (Ctrl+S)</span></div>
+                <div class="panel-title"><span>📝 Code Editor (<span id="currentFileName">None</span>)</span> <span>Save (Ctrl+S)</span></div>
                 <div class="editor-container" id="editorArea"></div>
             </div>
             <div class="panel">
                 <div class="panel-title"><span>🖥️ Terminal</span> <span id="currentTermHost">bash</span></div>
-                <div id="terminalsContainer">
-                    </div>
+                <div id="terminalsContainer"></div>
             </div>
         </div>
 
@@ -123,54 +107,37 @@
     </div>
 
     <script>
-        // ================= 核心状态机：多集群管理器 =================
-        const sessions = {}; // 存储所有会话: { id: { ws, term, fitAddon, filesHTML, stats } }
-        let activeId = null; // 当前聚焦的服务器 ID
+        const sessions = {}; 
+        let activeId = null; 
 
-        // ================= 初始化 UI 组件 =================
+        // 初始化 Monaco Editor
         let monacoEditor;
         require.config({ paths: { 'vs': 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.39.0/min/vs' }});
         require(['vs/editor/editor.main'], function() {
             monacoEditor = monaco.editor.create(document.getElementById('editorArea'), {
-                value: "// 建立连接并选择左侧文件以编辑...\n",
+                value: "// 建立连接并在左侧【单击】文件，以在此处加载远端文件流...\n",
                 language: 'javascript', theme: 'vs-dark', automaticLayout: true, minimap: { enabled: false }
             });
         });
 
+        // 初始化 ECharts
         const gaugeChart = echarts.init(document.getElementById('gaugeChart'), 'dark');
         const netChart = echarts.init(document.getElementById('netChart'), 'dark');
         
         function resetCharts() {
-            gaugeChart.setOption({
-                backgroundColor: 'transparent',
-                series: [
-                    { type: 'gauge', center: ['25%', '50%'], radius: '80%', progress: { show: true, width: 8 }, axisLine: { lineStyle: { width: 8 } }, axisTick: { show: false }, splitLine: { show: false }, axisLabel: { show: false }, pointer: { show: false }, detail: { valueAnimation: true, fontSize: 14, color: '#fff', formatter: '{value}%' }, data: [{ value: 0, name: 'CPU' }], title: { fontSize: 12, offsetCenter: [0, '80%'] } },
-                    { type: 'gauge', center: ['75%', '50%'], radius: '80%', progress: { show: true, width: 8, itemStyle: { color: '#007acc' } }, axisLine: { lineStyle: { width: 8 } }, axisTick: { show: false }, splitLine: { show: false }, axisLabel: { show: false }, pointer: { show: false }, detail: { valueAnimation: true, fontSize: 14, color: '#fff', formatter: '{value}%' }, data: [{ value: 0, name: 'RAM' }], title: { fontSize: 12, offsetCenter: [0, '80%'] } }
-                ]
-            });
+            gaugeChart.setOption({ series: [
+                { type: 'gauge', center: ['25%', '50%'], radius: '80%', progress: { show: true, width: 8 }, axisLine: { lineStyle: { width: 8 } }, axisTick: { show: false }, splitLine: { show: false }, axisLabel: { show: false }, pointer: { show: false }, detail: { valueAnimation: true, fontSize: 14, color: '#fff', formatter: '{value}%' }, data: [{ value: 0, name: 'CPU' }], title: { fontSize: 12, offsetCenter: [0, '80%'] } },
+                { type: 'gauge', center: ['75%', '50%'], radius: '80%', progress: { show: true, width: 8, itemStyle: { color: '#007acc' } }, axisLine: { lineStyle: { width: 8 } }, axisTick: { show: false }, splitLine: { show: false }, axisLabel: { show: false }, pointer: { show: false }, detail: { valueAnimation: true, fontSize: 14, color: '#fff', formatter: '{value}%' }, data: [{ value: 0, name: 'RAM' }], title: { fontSize: 12, offsetCenter: [0, '80%'] } }
+            ]});
             netChart.setOption({
-                backgroundColor: 'transparent',
-                title: { text: 'Network Traffic (KB/s)', textStyle: { fontSize: 12, color: '#888' } },
-                grid: { left: 30, right: 10, bottom: 20, top: 40 },
-                xAxis: { type: 'category', boundaryGap: false, data: Array(20).fill(''), show: false },
-                yAxis: { type: 'value', splitLine: { lineStyle: { color: '#2c3c31' } } },
-                series: [{ type: 'line', data: Array(20).fill(0), areaStyle: { color: 'rgba(0, 255, 102, 0.2)' }, itemStyle: { color: '#00ff66' }, smooth: true }]
+                grid: { left: 30, right: 10, bottom: 20, top: 40 }, xAxis: { type: 'category', boundaryGap: false, data: Array(20).fill(''), show: false }, yAxis: { type: 'value', splitLine: { lineStyle: { color: '#2c3c31' } } }, series: [{ type: 'line', data: Array(20).fill(0), areaStyle: { color: 'rgba(0, 255, 102, 0.2)' }, itemStyle: { color: '#00ff66' }, smooth: true }]
             });
         }
         resetCharts();
 
-        // ================= 弹窗控制 =================
-        function showLoginBox() {
-            document.getElementById('loginOverlay').style.display = 'flex';
-            setTimeout(() => document.getElementById('loginOverlay').style.opacity = '1', 10);
-            document.getElementById('closeLoginBtn').style.display = Object.keys(sessions).length > 0 ? 'block' : 'none';
-        }
-        function hideLoginBox() {
-            document.getElementById('loginOverlay').style.opacity = '0';
-            setTimeout(() => document.getElementById('loginOverlay').style.display = 'none', 300);
-        }
+        function showLoginBox() { document.getElementById('loginOverlay').style.display = 'flex'; setTimeout(() => document.getElementById('loginOverlay').style.opacity = '1', 10); document.getElementById('closeLoginBtn').style.display = Object.keys(sessions).length > 0 ? 'block' : 'none'; }
+        function hideLoginBox() { document.getElementById('loginOverlay').style.opacity = '0'; setTimeout(() => document.getElementById('loginOverlay').style.display = 'none', 300); }
 
-        // ================= 核心：连接与生命周期管理 =================
         function connectEngine() {
             const host = document.getElementById('host').value.trim();
             const port = parseInt(document.getElementById('port').value) || 22;
@@ -179,10 +146,8 @@
 
             const id = `${user}@${host}:${port}`;
             if(sessions[id]) return alert('该节点已存在连接！');
-
             hideLoginBox();
 
-            // 1. 创建底层 DOM 与 xterm 实例
             const termDiv = document.createElement('div');
             termDiv.className = 'terminal-wrapper';
             termDiv.id = `term_${id.replace(/\W/g, '_')}`;
@@ -193,20 +158,12 @@
             term.loadAddon(fitAddon);
             term.open(termDiv);
 
-            // 2. 初始化 Session 状态
-            sessions[id] = {
-                id: id, host: host,
-                ws: null, term: term, fitAddon: fitAddon, termDiv: termDiv,
-                filesHTML: '<div style="color:#666;text-align:center;">拉取目录中...</div>',
-                netData: Array(20).fill(0)
-            };
-
+            sessions[id] = { id, host, ws: null, term, fitAddon, termDiv, filesHTML: '<div style="color:#666;text-align:center;">拉取目录中...</div>', netData: Array(20).fill(0) };
             term.writeln('\x1b[33m[Engine]\x1b[0m 向集群分配节点中...');
 
-            // ================= 核心修复：WebSocket URL 拼接逻辑 =================
+            // WSS / WS 智能切换协议构造器
             const protocol = window.location.protocol === 'https:' ? 'wss://' : 'ws://';
-            const wsUrl = protocol + window.location.host + '/';
-            const ws = new WebSocket(wsUrl);
+            const ws = new WebSocket(protocol + window.location.host + '/');
             sessions[id].ws = ws;
 
             term.onData(data => { if(ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'TERMINAL_INPUT', data })); });
@@ -215,8 +172,7 @@
                 const creds = { host, port, username: user };
                 const pass = document.getElementById('pass').value;
                 const key = document.getElementById('key').value.trim();
-                if (key) { creds.privateKey = key; if (pass) creds.passphrase = pass; } 
-                else { creds.password = pass; }
+                if (key) { creds.privateKey = key; if (pass) creds.passphrase = pass; } else { creds.password = pass; }
                 ws.send(JSON.stringify(creds));
             };
 
@@ -230,80 +186,61 @@
                         const icon = f.isDir ? '<span class="icon-dir">📁</span>' : '<span class="icon-file">📄</span>';
                         return `<div class="file-item" onclick="openFile('${f.name}')">${icon} ${f.name}</div>`;
                     }).join('');
-                    if(activeId === id) updateActiveUI(); // 如果当前正是这个节点，直接刷新 UI
+                    if(activeId === id) updateActiveUI();
+                }
+                else if (packet.type === 'FILE_CONTENT') {
+                    if (activeId === id && monacoEditor) {
+                        monacoEditor.setValue(packet.content);
+                        const ext = packet.filename.split('.').pop().toLowerCase();
+                        const langMap = { 'js':'javascript', 'json':'json', 'html':'html', 'css':'css', 'sh':'shell', 'bash':'shell', 'py':'python', 'yaml':'yaml', 'yml':'yaml', 'conf':'ini' };
+                        monaco.editor.setModelLanguage(monacoEditor.getModel(), langMap[ext] || 'plaintext');
+                    }
                 }
                 else if (packet.type === 'MONITOR') {
                     sessions[id].netData.shift(); sessions[id].netData.push(packet.net);
-                    if(activeId === id) { // 只有该节点是活跃节点时，才渲染图表
+                    if(activeId === id) {
                         gaugeChart.setOption({ series: [{ data: [{ value: packet.cpu.toFixed(1), name: 'CPU' }] }, { data: [{ value: packet.mem.toFixed(1), name: 'RAM' }] }] });
                         netChart.setOption({ series: [{ data: sessions[id].netData }] });
                     }
                 }
             };
 
-            ws.onclose = () => { 
-                term.writeln('\r\n\x1b[31m[System]\x1b[0m 节点连接断开。'); 
-            };
-            ws.onerror = () => { 
-                term.writeln('\r\n\x1b[31m[System]\x1b[0m WebSocket 隧道建立失败，请检查 F12 控制台报错。'); 
-            };
-
-            // 切换到新节点
-            switchSession(id);
+            ws.onclose = () => term.writeln('\r\n\x1b[31m[System]\x1b[0m 节点连接断开。');
+            ws.onerror = () => term.writeln('\r\n\x1b[31m[System]\x1b[0m WebSocket 隧道建立失败。');
+            
+            switchSession(id); 
             renderServerList();
         }
 
-        // ================= 节点切换与销毁机制 =================
         function switchSession(id) {
             if(!sessions[id]) return;
             activeId = id;
-            
-            // 1. 终端分屏切换
             document.querySelectorAll('.terminal-wrapper').forEach(el => el.classList.remove('active'));
             sessions[id].termDiv.classList.add('active');
-            setTimeout(() => sessions[id].fitAddon.fit(), 50); // 必须在 display:block 后触发 fit
-
-            // 2. 状态信息切换
+            setTimeout(() => sessions[id].fitAddon.fit(), 50);
             document.getElementById('currentFileHost').innerText = sessions[id].host;
             document.getElementById('currentTermHost').innerText = sessions[id].id;
-            if(monacoEditor) monacoEditor.setValue(`// 当前环境: ${id}\n// 节点切换成功。`);
-            
-            renderServerList();
-            updateActiveUI();
+            renderServerList(); updateActiveUI();
         }
 
         function closeSession(id, event) {
-            event.stopPropagation(); // 阻止触发 switchSession
-            
-            // 销毁机制：断开 WS，删除 DOM，清理内存
+            event.stopPropagation();
             if(sessions[id].ws) sessions[id].ws.close();
             sessions[id].term.dispose();
             sessions[id].termDiv.remove();
             delete sessions[id];
-
-            // 如果关掉的是当前聚焦的节点，回退到其他可用节点
             if(activeId === id) {
                 const remaining = Object.keys(sessions);
-                if(remaining.length > 0) {
-                    switchSession(remaining[0]);
-                } else {
-                    activeId = null;
-                    document.getElementById('currentFileHost').innerText = 'None';
-                    document.getElementById('currentTermHost').innerText = 'bash';
-                    document.getElementById('fileManager').innerHTML = '无连接的节点';
-                    resetCharts();
-                    showLoginBox();
-                }
+                if(remaining.length > 0) switchSession(remaining[0]);
+                else { activeId = null; document.getElementById('currentFileHost').innerText = 'None'; document.getElementById('currentTermHost').innerText = 'bash'; document.getElementById('fileManager').innerHTML = '无连接的节点'; resetCharts(); showLoginBox(); }
             }
             renderServerList();
         }
 
         function renderServerList() {
-            const list = document.getElementById('serverList');
             const keys = Object.keys(sessions);
             document.getElementById('nodeCount').innerText = keys.length;
-            
-            list.innerHTML = keys.map(id => `
+            document.getElementById('serverList').innerHTML = keys.map(id => `
                 <div class="server-item ${id === activeId ? 'active' : ''}" onclick="switchSession('${id}')">
                     <span>🖥️ ${sessions[id].host}</span>
                     <span class="close-btn" onclick="closeSession('${id}', event)">✖</span>
@@ -311,18 +248,15 @@
             `).join('');
         }
 
-        function updateActiveUI() {
-            if(activeId && sessions[activeId]) {
-                document.getElementById('fileManager').innerHTML = sessions[activeId].filesHTML;
-            }
-        }
-
-        window.addEventListener('resize', () => {
-            if(activeId && sessions[activeId]) sessions[activeId].fitAddon.fit();
-        });
+        function updateActiveUI() { if(activeId && sessions[activeId]) document.getElementById('fileManager').innerHTML = sessions[activeId].filesHTML; }
+        
+        window.addEventListener('resize', () => { if(activeId && sessions[activeId]) sessions[activeId].fitAddon.fit(); });
 
         window.openFile = function(filename) {
-            if(monacoEditor) monacoEditor.setValue(`// 当前环境: ${activeId}\n// 编辑文件: /root/${filename}\n`);
+            if(!activeId || !sessions[activeId] || !sessions[activeId].ws) return;
+            document.getElementById('currentFileName').innerText = filename;
+            if(monacoEditor) monacoEditor.setValue(`// 正在从节点拉取文件流: /root/${filename} \n// 🚀 Engine Requesting...`);
+            sessions[activeId].ws.send(JSON.stringify({ type: 'READ_FILE', filename: filename }));
         };
     </script>
 </body>
