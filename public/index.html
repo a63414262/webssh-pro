@@ -39,10 +39,11 @@
         .chart-box { height: 180px; width: 100%; }
 
         /* 极客风登录框 */
-        #loginOverlay { position: absolute; inset: 0; background: rgba(0,0,0,0.85); backdrop-filter: blur(5px); display: flex; justify-content: center; align-items: center; z-index: 999; transition: 0.3s; }
-        .login-box { background: #161e18; border: 1px solid var(--accent); padding: 30px; width: 350px; border-radius: 8px; box-shadow: 0 0 30px rgba(0,255,102,0.1); display: grid; gap: 15px; }
-        input { background: #0a120c; color: #fff; border: 1px solid #3c4c41; padding: 10px; border-radius: 4px; font-family: monospace; outline: none;}
-        input:focus { border-color: var(--accent); }
+        #loginOverlay { position: absolute; inset: 0; background: rgba(0,0,0,0.85); backdrop-filter: blur(5px); display: flex; justify-content: center; align-items: center; z-index: 999; transition: opacity 0.3s; }
+        .login-box { background: #161e18; border: 1px solid var(--accent); padding: 30px; width: 400px; border-radius: 8px; box-shadow: 0 0 30px rgba(0,255,102,0.1); display: grid; gap: 15px; }
+        input, textarea { background: #0a120c; color: #fff; border: 1px solid #3c4c41; padding: 10px; border-radius: 4px; font-family: monospace; outline: none;}
+        input:focus, textarea:focus { border-color: var(--accent); }
+        textarea { height: 80px; resize: vertical; }
         button { background: var(--accent); color: #000; border: none; padding: 12px; cursor: pointer; font-weight: bold; border-radius: 4px; transition: 0.2s;}
         button:hover { background: #00cc52; box-shadow: 0 0 15px rgba(0,255,102,0.4);}
     </style>
@@ -51,10 +52,14 @@
     <div id="loginOverlay">
         <div class="login-box">
             <h2 style="margin:0 0 10px 0; color:#fff;">系统直连凭证</h2>
-            <input type="text" id="host" placeholder="Server IP" value="127.0.0.1">
+            <div style="display: flex; gap: 10px;">
+                <input type="text" id="host" placeholder="Server IP" value="" style="flex: 1;">
+                <input type="number" id="port" placeholder="Port" value="22" style="width: 80px;">
+            </div>
             <input type="text" id="user" placeholder="Username" value="root">
-            <input type="password" id="pass" placeholder="Password">
-            <button onclick="connectEngine()">⚡ 建立满血连接</button>
+            <input type="password" id="pass" placeholder="Password (或私钥密码)">
+            <textarea id="key" placeholder="在此粘贴私钥 (-----BEGIN OPENSSH PRIVATE KEY-----)&#10;留空则使用上方密码登录"></textarea>
+            <button id="connectBtn" onclick="connectEngine()">⚡ 建立满血连接</button>
         </div>
     </div>
 
@@ -138,6 +143,10 @@
         let ws = null;
 
         function connectEngine() {
+            const host = document.getElementById('host').value.trim();
+            if(!host) { alert('请输入 IP 地址'); return; }
+
+            // 隐藏登录框
             document.getElementById('loginOverlay').style.opacity = '0';
             setTimeout(() => document.getElementById('loginOverlay').style.display = 'none', 300);
             
@@ -146,18 +155,29 @@
 
             ws = new WebSocket(window.location.protocol === 'https:' ? 'wss://' : 'ws://' + window.location.host + '/');
             
-            // 终端按键捕获并发送
             term.onData(data => { 
                 if(ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'TERMINAL_INPUT', data })); 
             });
 
             ws.onopen = () => {
-                ws.send(JSON.stringify({
-                    host: document.getElementById('host').value,
-                    port: 22,
-                    username: document.getElementById('user').value,
-                    password: document.getElementById('pass').value
-                }));
+                // 动态构建认证凭据（支持密码与私钥）
+                const creds = {
+                    host: host,
+                    port: parseInt(document.getElementById('port').value) || 22,
+                    username: document.getElementById('user').value
+                };
+                
+                const pass = document.getElementById('pass').value;
+                const key = document.getElementById('key').value.trim();
+
+                if (key) {
+                    creds.privateKey = key;
+                    if (pass) creds.passphrase = pass; // 如果私钥有密码保护
+                } else {
+                    creds.password = pass;
+                }
+
+                ws.send(JSON.stringify(creds));
             };
 
             ws.onmessage = (e) => {
@@ -168,7 +188,6 @@
                     term.write(packet.data);
                 } 
                 else if (packet.type === 'SFTP_TREE') {
-                    // 渲染文件树
                     const html = packet.files.map(f => {
                         const icon = f.isDir ? '<span class="icon-dir">📁</span>' : '<span class="icon-file">📄</span>';
                         return `<div class="file-item" onclick="openFile('${f.name}')">${icon} ${f.name}</div>`;
@@ -176,13 +195,26 @@
                     document.getElementById('fileManager').innerHTML = html;
                 }
                 else if (packet.type === 'MONITOR') {
-                    // 刷新仪表盘动画
                     gaugeChart.setOption({ series: [{ data: [{ value: packet.cpu.toFixed(1), name: 'CPU' }] }, { data: [{ value: packet.mem.toFixed(1), name: 'RAM' }] }] });
-                    
                     rxData.shift(); rxData.push(packet.net);
                     netChart.setOption({ series: [{ data: rxData }] });
                 }
             };
+
+            // 【核心修复】：连接断开或报错时，重弹登录框
+            ws.onclose = () => { 
+                term.writeln('\r\n\x1b[31m[System]\x1b[0m 管道已断开，请检查网络或认证凭据。'); 
+                showLoginBox();
+            };
+            ws.onerror = () => { 
+                term.writeln('\r\n\x1b[31m[System]\x1b[0m 建立 WebSocket 隧道失败。'); 
+                showLoginBox();
+            };
+        }
+
+        function showLoginBox() {
+            document.getElementById('loginOverlay').style.display = 'flex';
+            setTimeout(() => document.getElementById('loginOverlay').style.opacity = '1', 50);
         }
 
         // 模拟文件点击事件
