@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <title>WebSSH Pro (云原生直连版)</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css" />
+    <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.js"></script>
+    <style>
+        body { background-color: #0c0c0c; margin: 0; padding: 20px; color: #fff; font-family: 'Consolas', monospace; }
+        .toolbar { display: flex; gap: 15px; margin-bottom: 15px; flex-wrap: wrap; align-items: flex-start; }
+        .input-group { display: flex; flex-direction: column; gap: 8px; }
+        input[type="text"], input[type="password"], textarea { 
+            padding: 8px; background: #222; color: #0f0; border: 1px solid #444; border-radius: 4px; outline: none; font-family: monospace; 
+        }
+        textarea { width: 350px; height: 70px; resize: vertical; }
+        button { padding: 8px 20px; background: #007acc; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; height: 35px; align-self: flex-end; }
+        button:hover { background: #005f9e; }
+        #terminal { width: 100%; height: 70vh; border: 1px solid #333; padding: 5px; border-radius: 4px; }
+        .hint { color: #888; font-size: 13px; margin-bottom: 2px; }
+    </style>
+</head>
+<body>
+    <h2>🚀 Serverless WebSSH (原生私有版)</h2>
+    <div class="toolbar">
+        <div class="input-group">
+            <div style="display: flex; gap: 10px;">
+                <input type="text" id="hostInput" placeholder="VPS IP" value="" />
+                <input type="text" id="portInput" placeholder="端口" value="22" style="width: 60px;" />
+            </div>
+            <div style="display: flex; gap: 10px;">
+                <input type="text" id="userInput" placeholder="用户名" value="root" style="width: 80px;" />
+                <input type="password" id="passInput" placeholder="密码 (或私钥密码)" />
+            </div>
+        </div>
+        <div class="input-group">
+            <div style="display: flex; align-items: center; justify-content: space-between;">
+                <label class="hint">📁 本地私钥文件 (支持所有格式):</label>
+                <input type="file" id="keyFileInput" style="color: #bbb; font-size: 12px; max-width: 180px;" />
+            </div>
+            <textarea id="keyInput" placeholder="在此粘贴私钥 (-----BEGIN OPENSSH PRIVATE KEY-----)&#10;留空则默认使用左侧密码登录"></textarea>
+        </div>
+        <button id="connectBtn">极客直连</button>
+    </div>
+    <div id="terminal"></div>
+
+    <script>
+        const term = new Terminal({ cursorBlink: true, theme: { background: '#0c0c0c' } });
+        const fitAddon = new FitAddon.FitAddon();
+        term.loadAddon(fitAddon);
+        term.open(document.getElementById('terminal'));
+        fitAddon.fit();
+        window.addEventListener('resize', () => fitAddon.fit());
+
+        term.writeln('\x1b[36m>>> WebSSH 引擎已就绪 <<<\x1b[0m');
+
+        document.getElementById('keyFileInput').addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = function(event) {
+                document.getElementById('keyInput').value = event.target.result;
+                term.writeln('\r\n\x1b[32m[System]\x1b[0m 私钥读取成功！');
+            };
+            reader.readAsText(file);
+        });
+
+        let ws = null;
+        term.onData(data => { if (ws && ws.readyState === WebSocket.OPEN) ws.send(data); });
+
+        document.getElementById('connectBtn').onclick = () => {
+            const host = document.getElementById('hostInput').value.trim();
+            const port = document.getElementById('portInput').value.trim() || '22';
+            const username = document.getElementById('userInput').value.trim() || 'root';
+            const password = document.getElementById('passInput').value;
+            const privateKey = document.getElementById('keyInput').value.trim();
+            
+            if (!host) { alert("请输入 IP！"); return; }
+
+            term.reset();
+            term.writeln('\x1b[33m[System]\x1b[0m 正在建立直连通道...');
+
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            ws = new WebSocket(protocol + '//' + window.location.host + '/');
+
+            ws.onopen = () => {
+                term.writeln('\x1b[32m[System]\x1b[0m 代理通道大开！正在下发加密凭证...');
+                const creds = { host, port: parseInt(port), username, readyTimeout: 20000 };
+                if (privateKey) {
+                    creds.privateKey = privateKey;
+                    if (password) creds.passphrase = password;
+                } else {
+                    creds.password = password;
+                }
+                ws.send(JSON.stringify(creds));
+            };
+
+            ws.onmessage = async (event) => {
+                let data = event.data instanceof Blob ? await event.data.text() : event.data;
+                term.write(data);
+            };
+
+            ws.onclose = () => term.writeln('\r\n\x1b[31m[System]\x1b[0m 管道已断开。');
+            ws.onerror = () => term.writeln('\r\n\x1b[31m[System]\x1b[0m 建立隧道失败。');
+        };
+    </script>
+</body>
+</html>
