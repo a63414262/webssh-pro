@@ -50,7 +50,7 @@ wss.on('connection', (ws, req) => {
                         sendDirTree(sftpSession);
                     });
 
-                    // 【核心更新】：使用 ps 命令抓取进程列表，按 CPU 占用排序取前 5 名
+                    // 常规循环探针 (取 Top 5)
                     monitorInterval = setInterval(() => {
                         const cmd = `sh -c "export LC_ALL=C; top -bn1 | grep -i -m1 'Cpu(s)' | awk '{print \\$2+\\$4}'; free | awk '/Mem:/{print \\$3/\\$2 * 100.0}'; cat /proc/net/dev | awk 'NR>2{rx+=\\$2} END{print rx}'; ps -eo rss,pcpu,comm --sort=-%cpu | head -n 6"`;
                         sshClient.exec(cmd, (e, exStream) => {
@@ -63,20 +63,17 @@ wss.on('connection', (ws, req) => {
                                     const cpu = parseFloat(p[0]) || 0;
                                     const mem = parseFloat(p[1]) || 0;
                                     const net = parseFloat(p[2]) || 0;
-                                    
-                                    // 解析进程列表 (跳过 ps 的表头，取前5个)
                                     const processLines = p.slice(4);
                                     const processes = processLines.map(line => {
                                         const parts = line.trim().split(/\s+/);
                                         if(parts.length >= 3) {
-                                            let rss = parseInt(parts[0]); // KB
+                                            let rss = parseInt(parts[0]);
                                             let memStr = rss > 1024 ? (rss/1024).toFixed(1) + 'M' : rss + 'K';
                                             if (rss === 0) memStr = '0';
                                             return { mem: memStr, cpu: parts[1], cmd: parts.slice(2).join(' ') };
                                         }
                                         return null;
                                     }).filter(Boolean);
-
                                     ws.send(JSON.stringify({ type: 'MONITOR', cpu, mem, net, processes }));
                                 }
                             });
@@ -98,6 +95,36 @@ wss.on('connection', (ws, req) => {
             try {
                 const cmd = JSON.parse(message);
                 if (cmd.type === 'TERMINAL_INPUT' && sshStream) sshStream.write(cmd.data);
+                
+                // 【核心新增】：抓取全量进程列表 (按 CPU 占用排序前 100)
+                else if (cmd.type === 'GET_PROCESS_LIST' && sshClient) {
+                    const psCmd = `export LC_ALL=C; ps -eo pid,user,rss,pcpu,comm,args --sort=-%cpu | head -n 101`;
+                    sshClient.exec(psCmd, (e, stream) => {
+                        if (e) return;
+                        let out = '';
+                        stream.on('data', d => out += d.toString());
+                        stream.on('close', () => {
+                            const lines = out.trim().split('\n').slice(1); // 掐掉表头
+                            const list = lines.map(line => {
+                                const parts = line.trim().split(/\s+/);
+                                if (parts.length < 6) return null;
+                                let rss = parseInt(parts[2]);
+                                let memStr = rss > 1024 ? (rss/1024).toFixed(1) + 'M' : rss + 'K';
+                                if (rss === 0) memStr = '0';
+                                return {
+                                    pid: parts[0],
+                                    user: parts[1],
+                                    mem: memStr,
+                                    cpu: parts[3],
+                                    name: parts[4],
+                                    cmdline: parts.slice(5).join(' ')
+                                };
+                            }).filter(Boolean);
+                            ws.send(JSON.stringify({ type: 'FULL_PROCESS_LIST', list }));
+                        });
+                    });
+                }
+                
                 else if (cmd.type === 'READ_FILE' && sftpSession) {
                     sftpSession.readFile(`/root/${cmd.filename}`, 'utf8', (err, data) => {
                         if (err) ws.send(JSON.stringify({ type: 'FILE_CONTENT', filename: cmd.filename, content: `// 读取失败: ${err.message}` }));
