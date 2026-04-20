@@ -74,6 +74,14 @@
         .pm-table-full td { padding: 10px 12px; border-bottom: 1px solid #1a231c; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 400px; }
         .pm-table-full tr:hover { background: rgba(0, 255, 102, 0.05); }
 
+        /* 【新增】：实时呼吸灯动画 */
+        @keyframes pulse-green {
+            0% { opacity: 0.3; }
+            50% { opacity: 1; text-shadow: 0 0 8px var(--accent); }
+            100% { opacity: 0.3; }
+        }
+        .live-indicator { font-size: 12px; font-weight: normal; color: var(--accent); margin-left: 15px; animation: pulse-green 2s infinite; }
+
         #loginOverlay { position: absolute; inset: 0; background: rgba(0,0,0,0.85); backdrop-filter: blur(5px); display: flex; justify-content: center; align-items: center; z-index: 999; transition: opacity 0.3s; }
         .login-box { background: #161e18; border: 1px solid var(--accent); padding: 30px; width: 400px; border-radius: 8px; box-shadow: 0 0 30px rgba(0,255,102,0.1); display: grid; gap: 15px; }
         input, textarea { background: #0a120c; color: #fff; border: 1px solid #3c4c41; padding: 10px; border-radius: 4px; font-family: monospace; outline: none;}
@@ -104,7 +112,7 @@
     <div id="processModal">
         <div class="pm-box">
             <div class="pm-header">
-                <span>🔍 服务器进程快照</span>
+                <span>🔍 服务器进程快照 <span class="live-indicator">🟢 实时监控中 (2s)</span></span>
                 <span style="cursor:pointer; color:var(--danger); font-size: 14px; padding:4px 8px; border:1px solid var(--danger); border-radius:4px;" onclick="closeProcessModal()">✖ 关闭面板</span>
             </div>
             <div class="pm-body">
@@ -186,8 +194,12 @@
     <script>
         const sessions = {}; 
         let activeId = null; 
+        
         let currentSortCol = 'cpu';
         let currentSortDir = 'desc';
+        
+        // 【核心新增】：进程轮询心跳器变量
+        let processPollingInterval = null;
 
         const editor = ace.edit("editorArea");
         editor.setTheme("ace/theme/twilight"); 
@@ -227,13 +239,39 @@
         };
         window.refreshDir = function() { if(activeId && sessions[activeId]) sessions[activeId].ws.send(JSON.stringify({ type: 'REFRESH_DIR' })); };
 
+        // ================= 【核心更新】：实时轮询控制逻辑 =================
         window.openProcessModal = function() {
             if(!activeId || !sessions[activeId] || !sessions[activeId].ws) return;
             document.getElementById('processModal').style.display = 'flex';
-            document.getElementById('fullProcessListBody').innerHTML = '<tr><td colspan="6" style="text-align:center; padding: 30px; color:#a0c2a8;">🚀 正在向服务器发送进程抓取指令...</td></tr>';
-            sessions[activeId].ws.send(JSON.stringify({ type: 'GET_PROCESS_LIST' }));
+            
+            // 仅在初次加载时显示 Loading
+            const tbody = document.getElementById('fullProcessListBody');
+            if (!sessions[activeId].fullProcessList) {
+                tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; padding: 30px; color:#a0c2a8;">🚀 正在建立实时监控通道...</td></tr>';
+            }
+
+            // 发送数据的函数
+            const fetchLiveProcess = () => {
+                if (activeId && sessions[activeId] && sessions[activeId].ws.readyState === WebSocket.OPEN) {
+                    sessions[activeId].ws.send(JSON.stringify({ type: 'GET_PROCESS_LIST' }));
+                }
+            };
+
+            fetchLiveProcess(); // 立即获取第一次
+            
+            // 开启心跳轮询，每 2 秒拿一次新数据
+            if (processPollingInterval) clearInterval(processPollingInterval);
+            processPollingInterval = setInterval(fetchLiveProcess, 2000);
         };
-        window.closeProcessModal = function() { document.getElementById('processModal').style.display = 'none'; };
+
+        window.closeProcessModal = function() { 
+            document.getElementById('processModal').style.display = 'none'; 
+            // 弹窗关闭时，立刻销毁心跳器，释放性能
+            if (processPollingInterval) {
+                clearInterval(processPollingInterval);
+                processPollingInterval = null;
+            }
+        };
 
         function parseMem(memStr) {
             if (!memStr || memStr === '0') return 0;
@@ -259,6 +297,8 @@
                 else if (currentSortCol === 'cpu') { valA = parseFloat(a.cpu) || 0; valB = parseFloat(b.cpu) || 0; }
                 return currentSortDir === 'desc' ? valB - valA : valA - valB;
             });
+            
+            // 动态替换表格数据（不仅实现了实时刷新，而且保留了你点击排序的状态！）
             document.getElementById('fullProcessListBody').innerHTML = list.map(p => `
                 <tr>
                     <td style="color:#fff;">${p.pid}</td>
@@ -279,7 +319,6 @@
                 { type: 'gauge', center: ['25%', '50%'], radius: '55%', progress: { show: true, width: 6 }, axisLine: { lineStyle: { width: 6 } }, axisTick: { show: false }, splitLine: { show: false }, axisLabel: { show: false }, pointer: { show: false }, detail: { valueAnimation: true, fontSize: 16, color: '#fff', formatter: '{value}%', offsetCenter: [0, '15%'] }, data: [{ value: 0, name: 'CPU' }], title: { fontSize: 12, offsetCenter: [0, '90%'], color: '#888' } },
                 { type: 'gauge', center: ['75%', '50%'], radius: '55%', progress: { show: true, width: 6, itemStyle: { color: '#007acc' } }, axisLine: { lineStyle: { width: 6 } }, axisTick: { show: false }, splitLine: { show: false }, axisLabel: { show: false }, pointer: { show: false }, detail: { valueAnimation: true, fontSize: 16, color: '#fff', formatter: '{value}%', offsetCenter: [0, '15%'] }, data: [{ value: 0, name: 'RAM' }], title: { fontSize: 12, offsetCenter: [0, '90%'], color: '#888' } }
             ]});
-            // 【核心修复】：修改 grid.left 为 45，给网速 Y 轴留出足够的显示空间，防止数字截断！
             netChart.setOption({ grid: { left: 45, right: 10, bottom: 20, top: 40 }, xAxis: { type: 'category', boundaryGap: false, data: Array(20).fill(''), show: false }, yAxis: { type: 'value', splitLine: { lineStyle: { color: '#2c3c31' } } }, series: [{ type: 'line', data: Array(20).fill(0), areaStyle: { color: 'rgba(0, 255, 102, 0.2)' }, itemStyle: { color: '#00ff66' }, smooth: true }] });
         }
         resetCharts();
@@ -319,7 +358,10 @@
                     if (activeId === id) { editor.setValue(packet.content, -1); editor.session.setMode(`ace/mode/${{'js':'javascript','json':'json','html':'html','css':'css','sh':'sh','bash':'sh','py':'python','yaml':'yaml','yml':'yaml','conf':'ini','xml':'xml'}[packet.filename.split('.').pop().toLowerCase()] || 'text'}`); }
                 }
                 else if (packet.type === 'FULL_PROCESS_LIST') {
-                    if (activeId === id) { sessions[id].fullProcessList = packet.list; renderFullProcessList(); }
+                    if (activeId === id) { 
+                        sessions[id].fullProcessList = packet.list; 
+                        renderFullProcessList(); // 后端数据一来，前端瞬间热更新
+                    }
                 }
                 else if (packet.type === 'MONITOR') {
                     sessions[id].netData.shift(); sessions[id].netData.push(packet.net); sessions[id].processes = packet.processes || [];
