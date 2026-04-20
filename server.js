@@ -3,11 +3,39 @@ const http = require('http');
 const WebSocket = require('ws');
 const { Client } = require('ssh2');
 const path = require('path');
+const fs = require('fs');
+const { exec } = require('child_process');
+const { SocksClient } = require('socks');
 
 const app = express();
 app.use(express.static(path.join(__dirname, 'public')));
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
+
+// ================= 【云原生 WARP 引擎自动点火】 =================
+if (process.env.WARP_PRIVATE_KEY && process.env.WARP_IPV6) {
+    console.log('[System] 检测到 WARP 环境变量，正在生成节点凭证...');
+    const warpConf = `
+[Interface]
+PrivateKey = ${process.env.WARP_PRIVATE_KEY}
+Address = 172.16.0.2/32
+Address = ${process.env.WARP_IPV6}
+DNS = 1.1.1.1
+MTU = 1280
+
+[Peer]
+PublicKey = bmXOC+F1FxEMF9dyiK2H5/1SUtzH0JuVo51h2wPfTzR=
+Endpoint = engage.cloudflareclient.com:2408
+
+[Socks5]
+BindAddress = 127.0.0.1:1080
+`;
+    fs.writeFileSync('/usr/src/app/warp.conf', warpConf.trim());
+    console.log('[System] 启动 Wireproxy (SOCKS5 隧道映射至本地 1080 端口)...');
+    exec('wireproxy -c /usr/src/app/warp.conf -d', (err) => {
+        if (err) console.error('[WARP Error] Wireproxy 运行失败:', err);
+    });
+}
 
 wss.on('connection', (ws, req) => {
     let sshClient = new Client();
@@ -50,11 +78,10 @@ wss.on('connection', (ws, req) => {
                         sendDirTree(sftpSession);
                     });
 
-                    // 初始化双向流量记忆
                     sshClient.lastRx = undefined;
                     sshClient.lastTx = undefined;
 
-                    // 【核心更新】：抓取 CPU、内存、双向流量、运行时间、系统负载、以及进程列表
+                    // 高频状态探针：包含负载、运行时间、双向网速、进程摘要
                     monitorInterval = setInterval(() => {
                         const cmd = `sh -c "export LC_ALL=C; top -bn1 | grep -i -m1 'Cpu(s)' | awk '{print \\$2+\\$4}'; free | awk '/Mem:/{print \\$3/\\$2 * 100.0}'; cat /proc/net/dev | awk 'NR>2{rx+=\\$2; tx+=\\$10} END{print rx, tx}'; cat /proc/uptime | awk '{print \\$1}'; cat /proc/loadavg | awk '{print \\$1,\\$2,\\$3}'; ps -eo rss,pcpu,comm --sort=-%cpu | head -n 6"`;
                         sshClient.exec(cmd, (e, exStream) => {
@@ -66,11 +93,9 @@ wss.on('connection', (ws, req) => {
                                 if (p.length >= 5) {
                                     const cpu = parseFloat(p[0]) || 0;
                                     const mem = parseFloat(p[1]) || 0;
-                                    
                                     const netParts = p[2].split(/\s+/);
                                     const currentRx = parseFloat(netParts[0]) || 0;
                                     const currentTx = parseFloat(netParts[1]) || 0;
-                                    
                                     const uptime = parseFloat(p[3]) || 0;
                                     const load = p[4] || '0.00 0.00 0.00';
                                     
@@ -94,13 +119,7 @@ wss.on('connection', (ws, req) => {
                                         return null;
                                     }).filter(Boolean);
                                     
-                                    ws.send(JSON.stringify({ 
-                                        type: 'MONITOR', 
-                                        cpu, mem, 
-                                        rxSpeed: parseFloat(rxSpeed.toFixed(1)), 
-                                        txSpeed: parseFloat(txSpeed.toFixed(1)), 
-                                        uptime, load, processes 
-                                    }));
+                                    ws.send(JSON.stringify({ type: 'MONITOR', cpu, mem, rxSpeed: parseFloat(rxSpeed.toFixed(1)), txSpeed: parseFloat(txSpeed.toFixed(1)), uptime, load, processes }));
                                 }
                             });
                         });
@@ -115,7 +134,22 @@ wss.on('connection', (ws, req) => {
                         ws.send(JSON.stringify({ type: 'TERMINAL', data: `\r\n\x1b[31m[SSH Error]:\x1b[0m ${err.message}\r\n` }));
                         ws.close();
                     }
-                }).connect(creds);
+                });
+
+                // ================= 【IPv6 连接智能劫持】 =================
+                if (creds.host.includes(':')) {
+                    const proxyOptions = { proxy: { ipaddress: '127.0.0.1', port: 1080, type: 5 }, command: 'connect', destination: { host: creds.host, port: creds.port } };
+                    SocksClient.createConnection(proxyOptions, (err, info) => {
+                        if (err) {
+                            if (ws.readyState === WebSocket.OPEN) { ws.send(JSON.stringify({ type: 'TERMINAL', data: `\r\n\x1b[31m[WARP Proxy Error]:\x1b[0m 纯 IPv6 隧道打通失败！请检查 Claw 环境变量是否配置正确。\r\n错误详情: ${err.message}\r\n` })); ws.close(); }
+                            return;
+                        }
+                        creds.sock = info.socket;
+                        sshClient.connect(creds);
+                    });
+                } else {
+                    sshClient.connect(creds);
+                }
             } catch (e) { ws.close(); }
         } else {
             try {
@@ -135,14 +169,7 @@ wss.on('connection', (ws, req) => {
                                 let rss = parseInt(parts[2]);
                                 let memStr = rss > 1024 ? (rss/1024).toFixed(1) + 'M' : rss + 'K';
                                 if (rss === 0) memStr = '0';
-                                return {
-                                    pid: parts[0],
-                                    user: parts[1],
-                                    mem: memStr,
-                                    cpu: parts[3],
-                                    name: parts[4],
-                                    cmdline: parts.slice(5).join(' ')
-                                };
+                                return { pid: parts[0], user: parts[1], mem: memStr, cpu: parts[3], name: parts[4], cmdline: parts.slice(5).join(' ') };
                             }).filter(Boolean);
                             ws.send(JSON.stringify({ type: 'FULL_PROCESS_LIST', list }));
                         });
@@ -172,11 +199,8 @@ wss.on('connection', (ws, req) => {
                 }
                 else if (cmd.type === 'DELETE_NODE' && sftpSession) {
                     const targetPath = `/root/${cmd.filename}`;
-                    if (cmd.isDir) {
-                        sftpSession.rmdir(targetPath, (err) => { if(!err) { ws.send(JSON.stringify({ type: 'SYSTEM_MSG', data: `\r\n\x1b[32m[System] 🗑️ 删除文件夹: ${cmd.filename}\x1b[0m\r\n` })); sendDirTree(sftpSession); } });
-                    } else {
-                        sftpSession.unlink(targetPath, (err) => { if(!err) { ws.send(JSON.stringify({ type: 'SYSTEM_MSG', data: `\r\n\x1b[32m[System] 🗑️ 删除文件: ${cmd.filename}\x1b[0m\r\n` })); sendDirTree(sftpSession); } });
-                    }
+                    if (cmd.isDir) { sftpSession.rmdir(targetPath, (err) => { if(!err) { ws.send(JSON.stringify({ type: 'SYSTEM_MSG', data: `\r\n\x1b[32m[System] 🗑️ 删除文件夹: ${cmd.filename}\x1b[0m\r\n` })); sendDirTree(sftpSession); } });
+                    } else { sftpSession.unlink(targetPath, (err) => { if(!err) { ws.send(JSON.stringify({ type: 'SYSTEM_MSG', data: `\r\n\x1b[32m[System] 🗑️ 删除文件: ${cmd.filename}\x1b[0m\r\n` })); sendDirTree(sftpSession); } }); }
                 }
                 else if (cmd.type === 'RENAME_NODE' && sftpSession) {
                     sftpSession.rename(`/root/${cmd.oldName}`, `/root/${cmd.newName}`, (err) => {
