@@ -12,6 +12,13 @@ app.use(express.static(path.join(__dirname, 'public')));
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
 
+// ================= 【内存级 Fail2Ban 防爆破拦截器】 =================
+const ipBlocklist = new Map(); // 封禁黑名单 (IP -> 解封时间戳)
+const ipAttempts = new Map();  // 失败计数器 (IP -> 失败次数)
+const MAX_ATTEMPTS = 5;        // 最大容忍错误次数
+const BLOCK_TIME = 24 * 60 * 60 * 1000; // 封禁时长：24小时
+
+// ================= 【全自动 WARP IPv6 申请与点火引擎】 =================
 const setupAutoWarp = () => {
     const confPath = '/usr/src/app/warp.conf';
     if (!fs.existsSync(confPath)) {
@@ -34,10 +41,28 @@ const setupAutoWarp = () => {
         });
     }
 };
-
 setupAutoWarp();
 
+// ================= 【WebSocket 核心路由】 =================
 wss.on('connection', (ws, req) => {
+    // 1. 穿透云原生网关，获取真实访问 IP
+    const clientIp = req.headers['x-forwarded-for'] ? req.headers['x-forwarded-for'].split(',')[0].trim() : req.socket.remoteAddress;
+
+    // 2. 绝对防御：检查 IP 是否在小黑屋中
+    if (ipBlocklist.has(clientIp)) {
+        const unblockTime = ipBlocklist.get(clientIp);
+        if (Date.now() < unblockTime) {
+            // 刑期未满，直接掐断，不消耗任何 SSH 资源
+            ws.send(JSON.stringify({ type: 'TERMINAL', data: `\r\n\x1b[1;41;37m [ 绝对防御 ] \x1b[0m\x1b[31m 您的 IP (${clientIp}) 因多次爆破尝试，已被系统物理隔离 24 小时！\x1b[0m\r\n` }));
+            ws.close();
+            return;
+        } else {
+            // 刑期已满，释放出狱
+            ipBlocklist.delete(clientIp);
+            ipAttempts.delete(clientIp);
+        }
+    }
+
     let sshClient = new Client();
     let sshStream = null;
     let sftpSession = null;
@@ -60,6 +85,9 @@ wss.on('connection', (ws, req) => {
                 creds.readyTimeout = 20000;
 
                 sshClient.on('ready', () => {
+                    // 3. 鉴权成功：清空该 IP 的失败记录
+                    ipAttempts.delete(clientIp);
+
                     sshClient.shell({ term: 'xterm-256color' }, (err, stream) => {
                         if (err) return ws.close();
                         sshStream = stream;
@@ -70,35 +98,25 @@ wss.on('connection', (ws, req) => {
 
                     sshClient.sftp((err, sftp) => { if (!err) { sftpSession = sftp; sendDirTree(sftpSession); } });
 
-                    sshClient.lastRx = undefined;
-                    sshClient.lastTx = undefined;
+                    sshClient.lastRx = undefined; sshClient.lastTx = undefined;
 
-                    // 【核心更新】：使用 awk 同时抓取 Mem 和 Swap，确保行数严格对齐
+                    // 高频状态探针 (CPU, RAM, SWAP, Net, Load, Processes)
                     monitorInterval = setInterval(() => {
                         const cmd = `sh -c "export LC_ALL=C; top -bn1 | grep -i -m1 'Cpu(s)' | awk '{print \\$2+\\$4}'; free | awk '/Mem:/{m=\\$3/\\$2*100.0} /Swap:/{s=(\\$2>0?\\$3/\\$2*100.0:0)} END{print m; print s+0}'; cat /proc/net/dev | awk 'NR>2{rx+=\\$2; tx+=\\$10} END{print rx, tx}'; cat /proc/uptime | awk '{print \\$1}'; cat /proc/loadavg | awk '{print \\$1,\\$2,\\$3}'; ps -eo rss,pcpu,comm --sort=-%cpu | head -n 6"`;
                         sshClient.exec(cmd, (e, exStream) => {
-                            if (e) return;
-                            let out = '';
-                            exStream.on('data', (d) => out += d.toString());
+                            if (e) return; let out = ''; exStream.on('data', (d) => out += d.toString());
                             exStream.on('close', () => {
                                 const p = out.trim().split('\n');
-                                if (p.length >= 6) { // 行数增加，变为 6 项基础数据
-                                    const cpu = parseFloat(p[0]) || 0; 
-                                    const mem = parseFloat(p[1]) || 0;
-                                    const swap = parseFloat(p[2]) || 0; // 新增 Swap 变量
-                                    
-                                    const netParts = p[3].split(/\s+/); 
-                                    const currentRx = parseFloat(netParts[0]) || 0; 
-                                    const currentTx = parseFloat(netParts[1]) || 0;
-                                    
-                                    const uptime = parseFloat(p[4]) || 0; 
-                                    const load = p[5] || '0.00 0.00 0.00';
+                                if (p.length >= 6) {
+                                    const cpu = parseFloat(p[0]) || 0; const mem = parseFloat(p[1]) || 0; const swap = parseFloat(p[2]) || 0;
+                                    const netParts = p[3].split(/\s+/); const currentRx = parseFloat(netParts[0]) || 0; const currentTx = parseFloat(netParts[1]) || 0;
+                                    const uptime = parseFloat(p[4]) || 0; const load = p[5] || '0.00 0.00 0.00';
                                     
                                     let rxSpeed = 0, txSpeed = 0;
                                     if (sshClient.lastRx !== undefined && currentRx >= sshClient.lastRx) { rxSpeed = (currentRx - sshClient.lastRx) / 1024 / 2; txSpeed = (currentTx - sshClient.lastTx) / 1024 / 2; }
                                     sshClient.lastRx = currentRx; sshClient.lastTx = currentTx;
 
-                                    const processLines = p.slice(6); // 进程列表从第 7 行开始
+                                    const processLines = p.slice(6);
                                     const processes = processLines.map(line => {
                                         const parts = line.trim().split(/\s+/);
                                         if(parts.length >= 3) {
@@ -107,8 +125,6 @@ wss.on('connection', (ws, req) => {
                                         }
                                         return null;
                                     }).filter(Boolean);
-                                    
-                                    // 传给前端新增 swap 字段
                                     ws.send(JSON.stringify({ type: 'MONITOR', cpu, mem, swap, rxSpeed: parseFloat(rxSpeed.toFixed(1)), txSpeed: parseFloat(txSpeed.toFixed(1)), uptime, load, processes }));
                                 }
                             });
@@ -117,7 +133,23 @@ wss.on('connection', (ws, req) => {
                 }).on('keyboard-interactive', (name, instructions, instructionsLang, prompts, finish) => {
                     if (prompts.length > 0 && prompts[0].prompt.toLowerCase().includes('password')) finish([creds.password]); else finish([]);
                 }).on('error', (err) => {
-                    if (ws.readyState === WebSocket.OPEN) { ws.send(JSON.stringify({ type: 'TERMINAL', data: `\r\n\x1b[31m[SSH Error]:\x1b[0m ${err.message}\r\n` })); ws.close(); }
+                    if (ws.readyState === WebSocket.OPEN) {
+                        // 4. 鉴权失败：触发 Fail2Ban 逻辑
+                        if (err.message.toLowerCase().includes('authenticat') || err.message.includes('Handshake failed')) {
+                            let attempts = (ipAttempts.get(clientIp) || 0) + 1;
+                            ipAttempts.set(clientIp, attempts);
+
+                            if (attempts >= MAX_ATTEMPTS) {
+                                ipBlocklist.set(clientIp, Date.now() + BLOCK_TIME); // 拉黑
+                                ws.send(JSON.stringify({ type: 'TERMINAL', data: `\r\n\x1b[1;41;37m [ 警报 ] \x1b[0m\x1b[31m 连续 ${MAX_ATTEMPTS} 次鉴权失败！触发防爆破保护，您的 IP 已被封禁 24 小时。\x1b[0m\r\n` }));
+                            } else {
+                                ws.send(JSON.stringify({ type: 'TERMINAL', data: `\r\n\x1b[31m[SSH 鉴权失败]:\x1b[0m 密码或私钥错误！(警告: 剩余尝试次数 ${MAX_ATTEMPTS - attempts})\r\n` }));
+                            }
+                        } else {
+                            ws.send(JSON.stringify({ type: 'TERMINAL', data: `\r\n\x1b[31m[SSH Error]:\x1b[0m ${err.message}\r\n` }));
+                        }
+                        ws.close();
+                    }
                 });
 
                 if (creds.host.includes(':')) {
@@ -157,8 +189,12 @@ wss.on('connection', (ws, req) => {
             } catch(e) { if (sshStream) sshStream.write(message); }
         }
     });
-    ws.on('close', () => { if (monitorInterval) clearInterval(monitorInterval); if (sshClient) sshClient.end(); });
+
+    ws.on('close', () => { 
+        if (monitorInterval) clearInterval(monitorInterval);
+        if (sshClient) sshClient.end(); 
+    });
 });
 
 const PORT = process.env.PORT || 8080;
-server.listen(PORT, '0.0.0.0', () => console.log(`[Running] WebOS 虚拟内存探针版已点火，监听端口: ${PORT}`));
+server.listen(PORT, '0.0.0.0', () => console.log(`[Running] WebOS 终极防爆破版已点火，监听端口: ${PORT}`));
