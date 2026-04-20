@@ -55,15 +55,23 @@
         .dashboard { flex: 1; padding: 15px; overflow-y: auto; display: flex; flex-direction: column; gap: 15px;}
         .chart-box { height: 160px; width: 100%; flex-shrink: 0; }
 
-        /* 【核心新增】：精美的进程管理表格 UI */
         .process-table { font-size: 12px; background: #0a120c; border: 1px solid #2c3c31; border-radius: 4px; overflow: hidden; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; flex: 1; min-height: 150px;}
         .pt-header { display: flex; background: #1a231c; padding: 8px 10px; color: #888; border-bottom: 1px solid #2c3c31; font-weight: bold; }
         .pt-row { display: flex; padding: 6px 10px; border-bottom: 1px solid #141c16; transition: background 0.2s; }
         .pt-row:hover { background: rgba(255,255,255,0.05); }
-        .pt-row:last-child { border-bottom: none; }
         .pt-col-mem { width: 60px; color: #dcb67a; font-family: Consolas, monospace; }
         .pt-col-cpu { width: 40px; color: #ff4d4f; font-family: Consolas, monospace; text-align: right; }
         .pt-col-cmd { flex: 1; padding-left: 15px; color: #a0c2a8; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+        /* 【核心新增】：高级进程管理器弹窗样式 */
+        #processModal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.8); z-index: 1000; justify-content: center; align-items: center; backdrop-filter: blur(5px); }
+        .pm-box { background: #111813; border: 1px solid var(--accent); width: 85%; height: 85%; border-radius: 8px; display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 0 40px rgba(0,255,102,0.15); }
+        .pm-header { padding: 15px 20px; background: #1a231c; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; color: #fff; font-weight: bold; font-size: 16px;}
+        .pm-body { flex: 1; overflow: auto; padding: 0; background: #0a120c; }
+        .pm-table-full { width: 100%; border-collapse: collapse; font-size: 13px; text-align: left; font-family: 'Segoe UI', Consolas, sans-serif;}
+        .pm-table-full th { background: #141c16; padding: 12px; border-bottom: 2px solid var(--border); position: sticky; top: 0; color: #888; }
+        .pm-table-full td { padding: 10px 12px; border-bottom: 1px solid #1a231c; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 400px; }
+        .pm-table-full tr:hover { background: rgba(0, 255, 102, 0.05); }
 
         #loginOverlay { position: absolute; inset: 0; background: rgba(0,0,0,0.85); backdrop-filter: blur(5px); display: flex; justify-content: center; align-items: center; z-index: 999; transition: opacity 0.3s; }
         .login-box { background: #161e18; border: 1px solid var(--accent); padding: 30px; width: 400px; border-radius: 8px; box-shadow: 0 0 30px rgba(0,255,102,0.1); display: grid; gap: 15px; }
@@ -92,6 +100,31 @@
         </div>
     </div>
 
+    <div id="processModal">
+        <div class="pm-box">
+            <div class="pm-header">
+                <span>🔍 服务器进程快照 (Top 100)</span>
+                <span style="cursor:pointer; color:var(--danger); font-size: 14px; padding:4px 8px; border:1px solid var(--danger); border-radius:4px;" onclick="closeProcessModal()">✖ 关闭面板</span>
+            </div>
+            <div class="pm-body">
+                <table class="pm-table-full">
+                    <thead>
+                        <tr>
+                            <th style="width: 80px;">PID</th>
+                            <th style="width: 100px;">用户</th>
+                            <th style="width: 100px;">内存占用</th>
+                            <th style="width: 80px;">CPU(%)</th>
+                            <th style="width: 150px;">名称</th>
+                            <th>完整命令行参数</th>
+                        </tr>
+                    </thead>
+                    <tbody id="fullProcessListBody">
+                        </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
     <div class="header">
         <div class="logo">🚀 WebSSH | 集群控制台</div>
         <div style="font-size: 12px; color: #888;">Active Nodes: <span id="nodeCount" style="color:var(--accent)">0</span></div>
@@ -101,7 +134,6 @@
         <div class="panel">
             <div class="panel-title"><span>🌐 节点集群</span> <span class="add-btn" onclick="showLoginBox()">+ Add</span></div>
             <div id="serverList"></div>
-            
             <div class="panel-title" style="border-top: 1px solid var(--border);">
                 <span>📁 /root (<span id="currentFileHost">None</span>)</span> 
                 <span class="file-actions">
@@ -112,16 +144,13 @@
                     <span title="刷新目录" onclick="refreshDir()">🔄</span>
                 </span>
             </div>
-            
             <div id="fileManager" style="color:#666; text-align:center; padding-top:20px;">未选择活跃节点</div>
         </div>
 
         <div class="main-area">
             <div class="panel" style="border-bottom: 2px solid var(--border);">
                 <div class="panel-title"><span>📝 Code Editor (<span id="currentFileName">None</span>)</span> <span id="saveIndicator" style="cursor:pointer; transition:0.3s;" onclick="saveCurrentFile()">Save (Ctrl+S)</span></div>
-                <div class="editor-container">
-                    <div id="editorArea"></div>
-                </div>
+                <div class="editor-container"><div id="editorArea"></div></div>
             </div>
             <div class="panel">
                 <div class="panel-title"><span>🖥️ Terminal</span> <span id="currentTermHost">bash</span></div>
@@ -135,7 +164,10 @@
                 <div id="gaugeChart" class="chart-box"></div>
                 <div id="netChart" class="chart-box" style="height: 160px;"></div>
                 
-                <div style="color:#888; font-size:12px; margin-bottom:-5px; border-top:1px solid var(--border); padding-top:10px;">⚙️ 活跃进程 (Top 5)</div>
+                <div style="color:#888; font-size:12px; margin-bottom:-5px; border-top:1px solid var(--border); padding-top:10px; display: flex; justify-content: space-between; align-items: center;">
+                    <span>⚙️ 活跃进程 (Top 5)</span>
+                    <span style="cursor:pointer; color:var(--accent); background:rgba(0,255,102,0.1); padding:2px 6px; border-radius:3px;" onclick="openProcessModal()">🔍 查看全部</span>
+                </div>
                 <div class="process-table">
                     <div class="pt-header">
                         <span class="pt-col-mem">内存</span>
@@ -158,14 +190,12 @@
         editor.setTheme("ace/theme/twilight"); 
         editor.session.setMode("ace/mode/sh"); 
         editor.setValue("// 建立连接并在左侧【双击】文件，以在此处加载远端文件流...\n// 在左侧【单击】选中文件后，可使用上方栏进行重命名和删除操作！", -1);
-        
         editor.commands.addCommand({ name: 'saveFile', bindKey: {win: "Ctrl-S", mac: "Command-S"}, exec: function(editor) { saveCurrentFile(); } });
 
         window.saveCurrentFile = function() {
             const filename = document.getElementById('currentFileName').innerText;
             if(!activeId || !sessions[activeId] || !sessions[activeId].ws || filename === 'None') return;
             sessions[activeId].ws.send(JSON.stringify({ type: 'WRITE_FILE', filename: filename, content: editor.getValue() }));
-            
             const saveBtn = document.getElementById('saveIndicator');
             saveBtn.innerText = '⏳ Saving...'; saveBtn.style.color = '#ffeb3b';
             setTimeout(() => { saveBtn.innerText = '✔ Saved'; saveBtn.style.color = '#00ff66'; setTimeout(() => { saveBtn.innerText = 'Save (Ctrl+S)'; saveBtn.style.color = '#fff'; }, 2000); }, 500);
@@ -176,7 +206,6 @@
             const name = prompt(`请输入新${type === 'file' ? '文件' : '文件夹'}名称：`);
             if(name && name.trim()) sessions[activeId].ws.send(JSON.stringify({ type: type==='file'?'CREATE_FILE':'CREATE_DIR', [type==='file'?'filename':'dirname']: name.trim() }));
         };
-
         window.renameNode = function() {
             if(!activeId || !sessions[activeId] || !sessions[activeId].ws) return;
             const node = sessions[activeId].selectedNode;
@@ -184,7 +213,6 @@
             const newName = prompt(`重命名为：`, node.name);
             if(newName && newName.trim() !== node.name) sessions[activeId].ws.send(JSON.stringify({ type: 'RENAME_NODE', oldName: node.name, newName: newName.trim() }));
         };
-
         window.deleteNode = function() {
             if(!activeId || !sessions[activeId] || !sessions[activeId].ws) return;
             const node = sessions[activeId].selectedNode;
@@ -194,15 +222,22 @@
                 if (!node.isDir && document.getElementById('currentFileName').innerText === node.name) { document.getElementById('currentFileName').innerText = 'None'; editor.setValue('// 文件已删除...', -1); }
             }
         };
+        window.refreshDir = function() { if(activeId && sessions[activeId]) sessions[activeId].ws.send(JSON.stringify({ type: 'REFRESH_DIR' })); };
 
-        window.refreshDir = function() {
+        // 【核心新增】：进程弹窗开关控制
+        window.openProcessModal = function() {
             if(!activeId || !sessions[activeId] || !sessions[activeId].ws) return;
-            sessions[activeId].ws.send(JSON.stringify({ type: 'REFRESH_DIR' }));
+            document.getElementById('processModal').style.display = 'flex';
+            document.getElementById('fullProcessListBody').innerHTML = '<tr><td colspan="6" style="text-align:center; padding: 30px; color:#a0c2a8;">🚀 正在向服务器发送进程抓取指令...</td></tr>';
+            // 发送指令请求全量进程
+            sessions[activeId].ws.send(JSON.stringify({ type: 'GET_PROCESS_LIST' }));
+        };
+        window.closeProcessModal = function() {
+            document.getElementById('processModal').style.display = 'none';
         };
 
         const gaugeChart = echarts.init(document.getElementById('gaugeChart'), 'dark');
         const netChart = echarts.init(document.getElementById('netChart'), 'dark');
-        
         function resetCharts() {
             gaugeChart.setOption({ backgroundColor: 'transparent', series: [
                 { type: 'gauge', center: ['25%', '45%'], radius: '65%', progress: { show: true, width: 6 }, axisLine: { lineStyle: { width: 6 } }, axisTick: { show: false }, splitLine: { show: false }, axisLabel: { show: false }, pointer: { show: false }, detail: { valueAnimation: true, fontSize: 16, color: '#fff', formatter: '{value}%', offsetCenter: [0, '15%'] }, data: [{ value: 0, name: 'CPU' }], title: { fontSize: 12, offsetCenter: [0, '90%'], color: '#888' } },
@@ -212,12 +247,9 @@
         }
         resetCharts();
 
-        // 渲染进程表格函数
         function renderProcesses(processes) {
             const container = document.getElementById('processListBody');
-            if(!processes || processes.length === 0) {
-                container.innerHTML = '<div style="padding:15px;color:#555;text-align:center;">暂无数据</div>'; return;
-            }
+            if(!processes || processes.length === 0) { container.innerHTML = '<div style="padding:15px;color:#555;text-align:center;">暂无数据</div>'; return; }
             container.innerHTML = processes.map(p => `
                 <div class="pt-row">
                     <span class="pt-col-mem">${p.mem}</span>
@@ -231,37 +263,18 @@
         function hideLoginBox() { document.getElementById('loginOverlay').style.opacity = '0'; setTimeout(() => document.getElementById('loginOverlay').style.display = 'none', 300); }
 
         function connectEngine() {
-            const host = document.getElementById('host').value.trim();
-            const port = parseInt(document.getElementById('port').value) || 22;
-            const user = document.getElementById('user').value.trim();
-            if(!host) return;
+            const host = document.getElementById('host').value.trim(); const port = parseInt(document.getElementById('port').value) || 22; const user = document.getElementById('user').value.trim();
+            if(!host) return; const id = `${user}@${host}:${port}`; if(sessions[id]) return alert('已存在连接！'); hideLoginBox();
 
-            const id = `${user}@${host}:${port}`;
-            if(sessions[id]) return alert('已存在连接！');
-            hideLoginBox();
+            const termDiv = document.createElement('div'); termDiv.className = 'terminal-wrapper'; termDiv.id = `term_${id.replace(/\W/g, '_')}`; document.getElementById('terminalsContainer').appendChild(termDiv);
+            const term = new Terminal({ cursorBlink: true, theme: { background: '#000', foreground: '#a0c2a8' }, fontFamily: 'Consolas' }); const fitAddon = new FitAddon.FitAddon(); term.loadAddon(fitAddon); term.open(termDiv);
 
-            const termDiv = document.createElement('div');
-            termDiv.className = 'terminal-wrapper'; termDiv.id = `term_${id.replace(/\W/g, '_')}`;
-            document.getElementById('terminalsContainer').appendChild(termDiv);
-
-            const term = new Terminal({ cursorBlink: true, theme: { background: '#000', foreground: '#a0c2a8' }, fontFamily: 'Consolas' });
-            const fitAddon = new FitAddon.FitAddon(); term.loadAddon(fitAddon); term.open(termDiv);
-
-            // 增加 processes 数组状态保存
             sessions[id] = { id, host, ws: null, term, fitAddon, termDiv, filesHTML: '<div style="color:#666;text-align:center;">拉取目录中...</div>', netData: Array(20).fill(0), selectedNode: null, processes: [] };
             term.writeln('\x1b[33m[Engine]\x1b[0m 向集群分配节点中...');
-
-            const ws = new WebSocket((window.location.protocol === 'https:' ? 'wss://' : 'ws://') + window.location.host + '/');
-            sessions[id].ws = ws;
+            const ws = new WebSocket((window.location.protocol === 'https:' ? 'wss://' : 'ws://') + window.location.host + '/'); sessions[id].ws = ws;
 
             term.onData(data => { if(ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'TERMINAL_INPUT', data })); });
-
-            ws.onopen = () => {
-                const creds = { host, port, username: user };
-                const pass = document.getElementById('pass').value; const key = document.getElementById('key').value.trim();
-                if (key) { creds.privateKey = key; if (pass) creds.passphrase = pass; } else { creds.password = pass; }
-                ws.send(JSON.stringify(creds));
-            };
+            ws.onopen = () => { const creds = { host, port, username: user }; const pass = document.getElementById('pass').value; const key = document.getElementById('key').value.trim(); if (key) { creds.privateKey = key; if (pass) creds.passphrase = pass; } else { creds.password = pass; } ws.send(JSON.stringify(creds)); };
 
             ws.onmessage = (e) => {
                 const packet = JSON.parse(e.data);
@@ -274,71 +287,48 @@
                 else if (packet.type === 'FILE_CONTENT') {
                     if (activeId === id) { editor.setValue(packet.content, -1); editor.session.setMode(`ace/mode/${{'js':'javascript','json':'json','html':'html','css':'css','sh':'sh','bash':'sh','py':'python','yaml':'yaml','yml':'yaml','conf':'ini','xml':'xml'}[packet.filename.split('.').pop().toLowerCase()] || 'text'}`); }
                 }
+                // 【核心新增】：接收并在弹窗内渲染全量进程列表
+                else if (packet.type === 'FULL_PROCESS_LIST') {
+                    if (activeId === id) {
+                        const tbody = document.getElementById('fullProcessListBody');
+                        tbody.innerHTML = packet.list.map(p => `
+                            <tr>
+                                <td style="color:#fff;">${p.pid}</td>
+                                <td style="color:#dcb67a;">${p.user}</td>
+                                <td style="color:#ffb86c; font-family:Consolas;">${p.mem}</td>
+                                <td style="color:#ff5555; font-family:Consolas;">${p.cpu}</td>
+                                <td style="color:#8be9fd;">${p.name}</td>
+                                <td style="color:#6272a4;" title="${p.cmdline}">${p.cmdline}</td>
+                            </tr>
+                        `).join('');
+                    }
+                }
                 else if (packet.type === 'MONITOR') {
-                    sessions[id].netData.shift(); sessions[id].netData.push(packet.net);
-                    sessions[id].processes = packet.processes || []; // 保存进程数据
-
+                    sessions[id].netData.shift(); sessions[id].netData.push(packet.net); sessions[id].processes = packet.processes || [];
                     if(activeId === id) {
                         gaugeChart.setOption({ series: [{ data: [{ value: packet.cpu.toFixed(1), name: 'CPU' }] }, { data: [{ value: packet.mem.toFixed(1), name: 'RAM' }] }] });
                         netChart.setOption({ series: [{ data: sessions[id].netData }] });
-                        // 动态渲染表格
                         renderProcesses(sessions[id].processes);
                     }
                 }
             };
-
-            ws.onclose = () => term.writeln('\r\n\x1b[31m[System]\x1b[0m 节点连接断开。');
-            ws.onerror = () => term.writeln('\r\n\x1b[31m[System]\x1b[0m WebSocket 隧道建立失败。');
+            ws.onclose = () => term.writeln('\r\n\x1b[31m[System]\x1b[0m 节点连接断开。'); ws.onerror = () => term.writeln('\r\n\x1b[31m[System]\x1b[0m WebSocket 隧道建立失败。');
             switchSession(id); renderServerList();
         }
 
-        window.selectFileDom = function(el, name, isDir) {
-            document.querySelectorAll('.file-item').forEach(e => e.classList.remove('selected')); el.classList.add('selected');
-            if (activeId && sessions[activeId]) sessions[activeId].selectedNode = { name, isDir }; 
-        };
-
+        window.selectFileDom = function(el, name, isDir) { document.querySelectorAll('.file-item').forEach(e => e.classList.remove('selected')); el.classList.add('selected'); if (activeId && sessions[activeId]) sessions[activeId].selectedNode = { name, isDir }; };
         function switchSession(id) {
-            if(!sessions[id]) return;
-            activeId = id;
-            document.querySelectorAll('.terminal-wrapper').forEach(el => el.classList.remove('active'));
-            sessions[id].termDiv.classList.add('active');
-            setTimeout(() => sessions[id].fitAddon.fit(), 50);
-            document.getElementById('currentFileHost').innerText = sessions[id].host;
-            document.getElementById('currentTermHost').innerText = sessions[id].id;
-            
-            // 切换节点时，渲染对应节点的进程表格
-            renderProcesses(sessions[id].processes);
-            
-            renderServerList(); updateActiveUI();
+            if(!sessions[id]) return; activeId = id; document.querySelectorAll('.terminal-wrapper').forEach(el => el.classList.remove('active')); sessions[id].termDiv.classList.add('active');
+            setTimeout(() => sessions[id].fitAddon.fit(), 50); document.getElementById('currentFileHost').innerText = sessions[id].host; document.getElementById('currentTermHost').innerText = sessions[id].id;
+            renderProcesses(sessions[id].processes); renderServerList(); updateActiveUI();
         }
-
         function closeSession(id, event) {
-            event.stopPropagation();
-            if(sessions[id].ws) sessions[id].ws.close();
-            sessions[id].term.dispose(); sessions[id].termDiv.remove(); delete sessions[id];
-            if(activeId === id) {
-                const remaining = Object.keys(sessions);
-                if(remaining.length > 0) switchSession(remaining[0]);
-                else { activeId = null; document.getElementById('currentFileHost').innerText = 'None'; document.getElementById('currentTermHost').innerText = 'bash'; document.getElementById('fileManager').innerHTML = '无连接的节点'; renderProcesses([]); resetCharts(); showLoginBox(); }
-            }
+            event.stopPropagation(); if(sessions[id].ws) sessions[id].ws.close(); sessions[id].term.dispose(); sessions[id].termDiv.remove(); delete sessions[id];
+            if(activeId === id) { const remaining = Object.keys(sessions); if(remaining.length > 0) switchSession(remaining[0]); else { activeId = null; document.getElementById('currentFileHost').innerText = 'None'; document.getElementById('currentTermHost').innerText = 'bash'; document.getElementById('fileManager').innerHTML = '无连接的节点'; renderProcesses([]); resetCharts(); showLoginBox(); } }
             renderServerList();
         }
-
-        function renderServerList() {
-            const keys = Object.keys(sessions); document.getElementById('nodeCount').innerText = keys.length;
-            document.getElementById('serverList').innerHTML = keys.map(id => `<div class="server-item ${id === activeId ? 'active' : ''}" onclick="switchSession('${id}')"><span>🖥️ ${sessions[id].host}</span><span class="close-btn" onclick="closeSession('${id}', event)">✖</span></div>`).join('');
-        }
-
-        function updateActiveUI() { 
-            if(activeId && sessions[activeId]) {
-                document.getElementById('fileManager').innerHTML = sessions[activeId].filesHTML;
-                if(sessions[activeId].selectedNode) {
-                    const items = document.querySelectorAll('.file-item');
-                    for(let i=0; i<items.length; i++) { if(items[i].innerText.includes(sessions[activeId].selectedNode.name)) { items[i].classList.add('selected'); break; } }
-                }
-            }
-        }
-        
+        function renderServerList() { const keys = Object.keys(sessions); document.getElementById('nodeCount').innerText = keys.length; document.getElementById('serverList').innerHTML = keys.map(id => `<div class="server-item ${id === activeId ? 'active' : ''}" onclick="switchSession('${id}')"><span>🖥️ ${sessions[id].host}</span><span class="close-btn" onclick="closeSession('${id}', event)">✖</span></div>`).join(''); }
+        function updateActiveUI() { if(activeId && sessions[activeId]) { document.getElementById('fileManager').innerHTML = sessions[activeId].filesHTML; if(sessions[activeId].selectedNode) { const items = document.querySelectorAll('.file-item'); for(let i=0; i<items.length; i++) { if(items[i].innerText.includes(sessions[activeId].selectedNode.name)) { items[i].classList.add('selected'); break; } } } } }
         window.addEventListener('resize', () => { if(activeId && sessions[activeId]) sessions[activeId].fitAddon.fit(); });
         window.openFile = function(filename) { if(!activeId || !sessions[activeId] || !sessions[activeId].ws) return; document.getElementById('currentFileName').innerText = filename; editor.setValue(`// 正在从节点拉取文件流: /root/${filename} \n// 🚀 Engine Requesting...`, -1); sessions[activeId].ws.send(JSON.stringify({ type: 'READ_FILE', filename: filename })); };
     </script>
