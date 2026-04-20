@@ -55,7 +55,6 @@
         .dashboard { flex: 1; padding: 15px; overflow-y: auto; display: flex; flex-direction: column; gap: 15px;}
         .chart-box { height: 160px; width: 100%; flex-shrink: 0; }
 
-        /* 【核心新增】：四宫格状态数据盘样式 */
         .system-status-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; background: #0a120c; padding: 12px; border-radius: 6px; border: 1px solid #2c3c31; flex-shrink: 0; }
         .status-item { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: #888; }
         .status-item .val-text { font-size: 14px; font-weight: bold; color: #fff; font-family: Consolas, monospace; }
@@ -99,7 +98,7 @@
                 <span style="cursor:pointer; color:#888; font-size:16px;" onclick="hideLoginBox()" id="closeLoginBtn" style="display:none;">✖</span>
             </h2>
             <div style="display: flex; gap: 10px;">
-                <input type="text" id="host" placeholder="Server IP" value="" style="flex: 1;">
+                <input type="text" id="host" placeholder="Server IP / IPv6" value="" style="flex: 1;">
                 <input type="number" id="port" placeholder="Port" value="22" style="width: 80px;">
             </div>
             <input type="text" id="user" placeholder="Username" value="root">
@@ -295,7 +294,6 @@
             `).join('');
         }
 
-        // 【新增】：秒数换算为 天/小时/分钟 的函数
         function formatUptime(seconds) {
             if(!seconds) return '--';
             const d = Math.floor(seconds / (3600*24));
@@ -330,7 +328,6 @@
             const termDiv = document.createElement('div'); termDiv.className = 'terminal-wrapper'; termDiv.id = `term_${id.replace(/\W/g, '_')}`; document.getElementById('terminalsContainer').appendChild(termDiv);
             const term = new Terminal({ cursorBlink: true, theme: { background: '#000', foreground: '#a0c2a8' }, fontFamily: 'Consolas' }); const fitAddon = new FitAddon.FitAddon(); term.loadAddon(fitAddon); term.open(termDiv);
 
-            // 【更新状态机】：增加 rxSpeed, txSpeed, uptime, load 缓存
             sessions[id] = { id, host, ws: null, term, fitAddon, termDiv, filesHTML: '<div style="color:#666;text-align:center;">拉取目录中...</div>', selectedNode: null, processes: [], fullProcessList: null, rxSpeed: 0, txSpeed: 0, uptime: 0, load: '0.00 0.00 0.00' };
             term.writeln('\x1b[33m[Engine]\x1b[0m 向集群分配节点中...');
             const ws = new WebSocket((window.location.protocol === 'https:' ? 'wss://' : 'ws://') + window.location.host + '/'); sessions[id].ws = ws;
@@ -353,7 +350,6 @@
                     if (activeId === id) { sessions[id].fullProcessList = packet.list; renderFullProcessList(); }
                 }
                 else if (packet.type === 'MONITOR') {
-                    // 更新当前节点状态
                     sessions[id].processes = packet.processes || [];
                     sessions[id].rxSpeed = packet.rxSpeed;
                     sessions[id].txSpeed = packet.txSpeed;
@@ -363,8 +359,6 @@
                     if(activeId === id) {
                         gaugeChart.setOption({ series: [{ data: [{ value: packet.cpu.toFixed(1), name: 'CPU' }] }, { data: [{ value: packet.mem.toFixed(1), name: 'RAM' }] }] });
                         renderProcesses(sessions[id].processes);
-                        
-                        // 【渲染硬核数据盘】
                         document.getElementById('sysUptime').innerText = formatUptime(sessions[id].uptime);
                         document.getElementById('sysLoad').innerText = sessions[id].load;
                         document.getElementById('sysRx').innerText = sessions[id].rxSpeed + ' KB/s';
@@ -381,7 +375,6 @@
             if(!sessions[id]) return; activeId = id; document.querySelectorAll('.terminal-wrapper').forEach(el => el.classList.remove('active')); sessions[id].termDiv.classList.add('active');
             setTimeout(() => sessions[id].fitAddon.fit(), 50); document.getElementById('currentFileHost').innerText = sessions[id].host; document.getElementById('currentTermHost').innerText = sessions[id].id;
             
-            // 切换节点时，同步切换并渲染数据盘
             renderProcesses(sessions[id].processes);
             document.getElementById('sysUptime').innerText = formatUptime(sessions[id].uptime);
             document.getElementById('sysLoad').innerText = sessions[id].load || '--';
