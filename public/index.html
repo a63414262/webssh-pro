@@ -68,12 +68,9 @@
         .pm-header { padding: 15px 20px; background: #1a231c; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; color: #fff; font-weight: bold; font-size: 16px;}
         .pm-body { flex: 1; overflow: auto; padding: 0; background: #0a120c; }
         .pm-table-full { width: 100%; border-collapse: collapse; font-size: 13px; text-align: left; font-family: 'Segoe UI', Consolas, sans-serif;}
-        
-        /* 排序表头样式优化 */
         .pm-table-full th { background: #141c16; padding: 12px; border-bottom: 2px solid var(--border); position: sticky; top: 0; color: #888; user-select: none; }
         .pm-table-full th.sortable:hover { color: #fff; background: #1a231c; }
         .sort-icon { color: var(--accent); font-size: 10px; margin-left: 4px; }
-        
         .pm-table-full td { padding: 10px 12px; border-bottom: 1px solid #1a231c; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 400px; }
         .pm-table-full tr:hover { background: rgba(0, 255, 102, 0.05); }
 
@@ -123,7 +120,7 @@
                         </tr>
                     </thead>
                     <tbody id="fullProcessListBody">
-                        </tbody>
+                    </tbody>
                 </table>
             </div>
         </div>
@@ -189,8 +186,6 @@
     <script>
         const sessions = {}; 
         let activeId = null; 
-
-        // 全局排序状态
         let currentSortCol = 'cpu';
         let currentSortDir = 'desc';
 
@@ -240,49 +235,31 @@
         };
         window.closeProcessModal = function() { document.getElementById('processModal').style.display = 'none'; };
 
-        // ================= 【核心新增】：前端 JS 内存排序算法 =================
         function parseMem(memStr) {
             if (!memStr || memStr === '0') return 0;
             let val = parseFloat(memStr);
-            if (memStr.includes('M')) return val * 1024; // 统一换算为 KB 用于比较
+            if (memStr.includes('M')) return val * 1024;
             return val;
         }
 
         window.sortProcessList = function(col) {
-            if (currentSortCol === col) {
-                currentSortDir = currentSortDir === 'desc' ? 'asc' : 'desc'; // 切换升降序
-            } else {
-                currentSortCol = col;
-                currentSortDir = 'desc'; // 新列默认降序
-            }
-            
-            // 更新表头箭头 UI
+            if (currentSortCol === col) currentSortDir = currentSortDir === 'desc' ? 'asc' : 'desc';
+            else { currentSortCol = col; currentSortDir = 'desc'; }
             document.getElementById('sort-mem').innerText = col === 'mem' ? (currentSortDir === 'desc' ? '▼' : '▲') : '';
             document.getElementById('sort-cpu').innerText = col === 'cpu' ? (currentSortDir === 'desc' ? '▼' : '▲') : '';
-
-            renderFullProcessList(); // 触发重新渲染
+            renderFullProcessList();
         };
 
         function renderFullProcessList() {
             if (!activeId || !sessions[activeId] || !sessions[activeId].fullProcessList) return;
-            
-            // 克隆数组进行排序
             let list = [...sessions[activeId].fullProcessList];
-            
             list.sort((a, b) => {
                 let valA, valB;
-                if (currentSortCol === 'mem') {
-                    valA = parseMem(a.mem);
-                    valB = parseMem(b.mem);
-                } else if (currentSortCol === 'cpu') {
-                    valA = parseFloat(a.cpu) || 0;
-                    valB = parseFloat(b.cpu) || 0;
-                }
+                if (currentSortCol === 'mem') { valA = parseMem(a.mem); valB = parseMem(b.mem); } 
+                else if (currentSortCol === 'cpu') { valA = parseFloat(a.cpu) || 0; valB = parseFloat(b.cpu) || 0; }
                 return currentSortDir === 'desc' ? valB - valA : valA - valB;
             });
-
-            const tbody = document.getElementById('fullProcessListBody');
-            tbody.innerHTML = list.map(p => `
+            document.getElementById('fullProcessListBody').innerHTML = list.map(p => `
                 <tr>
                     <td style="color:#fff;">${p.pid}</td>
                     <td style="color:#dcb67a;">${p.user}</td>
@@ -297,21 +274,13 @@
         const gaugeChart = echarts.init(document.getElementById('gaugeChart'), 'dark');
         const netChart = echarts.init(document.getElementById('netChart'), 'dark');
         
-        // ================= 【核心修复】：防止仪表盘重叠的终极参数 =================
         function resetCharts() {
             gaugeChart.setOption({ backgroundColor: 'transparent', series: [
-                { 
-                    type: 'gauge', center: ['25%', '50%'], 
-                    radius: '55%', // 彻底缩小半径，绝对不再重叠！
-                    progress: { show: true, width: 6 }, axisLine: { lineStyle: { width: 6 } }, axisTick: { show: false }, splitLine: { show: false }, axisLabel: { show: false }, pointer: { show: false }, detail: { valueAnimation: true, fontSize: 16, color: '#fff', formatter: '{value}%', offsetCenter: [0, '15%'] }, data: [{ value: 0, name: 'CPU' }], title: { fontSize: 12, offsetCenter: [0, '90%'], color: '#888' } 
-                },
-                { 
-                    type: 'gauge', center: ['75%', '50%'], 
-                    radius: '55%', // 彻底缩小半径
-                    progress: { show: true, width: 6, itemStyle: { color: '#007acc' } }, axisLine: { lineStyle: { width: 6 } }, axisTick: { show: false }, splitLine: { show: false }, axisLabel: { show: false }, pointer: { show: false }, detail: { valueAnimation: true, fontSize: 16, color: '#fff', formatter: '{value}%', offsetCenter: [0, '15%'] }, data: [{ value: 0, name: 'RAM' }], title: { fontSize: 12, offsetCenter: [0, '90%'], color: '#888' } 
-                }
+                { type: 'gauge', center: ['25%', '50%'], radius: '55%', progress: { show: true, width: 6 }, axisLine: { lineStyle: { width: 6 } }, axisTick: { show: false }, splitLine: { show: false }, axisLabel: { show: false }, pointer: { show: false }, detail: { valueAnimation: true, fontSize: 16, color: '#fff', formatter: '{value}%', offsetCenter: [0, '15%'] }, data: [{ value: 0, name: 'CPU' }], title: { fontSize: 12, offsetCenter: [0, '90%'], color: '#888' } },
+                { type: 'gauge', center: ['75%', '50%'], radius: '55%', progress: { show: true, width: 6, itemStyle: { color: '#007acc' } }, axisLine: { lineStyle: { width: 6 } }, axisTick: { show: false }, splitLine: { show: false }, axisLabel: { show: false }, pointer: { show: false }, detail: { valueAnimation: true, fontSize: 16, color: '#fff', formatter: '{value}%', offsetCenter: [0, '15%'] }, data: [{ value: 0, name: 'RAM' }], title: { fontSize: 12, offsetCenter: [0, '90%'], color: '#888' } }
             ]});
-            netChart.setOption({ grid: { left: 30, right: 10, bottom: 20, top: 40 }, xAxis: { type: 'category', boundaryGap: false, data: Array(20).fill(''), show: false }, yAxis: { type: 'value', splitLine: { lineStyle: { color: '#2c3c31' } } }, series: [{ type: 'line', data: Array(20).fill(0), areaStyle: { color: 'rgba(0, 255, 102, 0.2)' }, itemStyle: { color: '#00ff66' }, smooth: true }] });
+            // 【核心修复】：修改 grid.left 为 45，给网速 Y 轴留出足够的显示空间，防止数字截断！
+            netChart.setOption({ grid: { left: 45, right: 10, bottom: 20, top: 40 }, xAxis: { type: 'category', boundaryGap: false, data: Array(20).fill(''), show: false }, yAxis: { type: 'value', splitLine: { lineStyle: { color: '#2c3c31' } } }, series: [{ type: 'line', data: Array(20).fill(0), areaStyle: { color: 'rgba(0, 255, 102, 0.2)' }, itemStyle: { color: '#00ff66' }, smooth: true }] });
         }
         resetCharts();
 
@@ -350,10 +319,7 @@
                     if (activeId === id) { editor.setValue(packet.content, -1); editor.session.setMode(`ace/mode/${{'js':'javascript','json':'json','html':'html','css':'css','sh':'sh','bash':'sh','py':'python','yaml':'yaml','yml':'yaml','conf':'ini','xml':'xml'}[packet.filename.split('.').pop().toLowerCase()] || 'text'}`); }
                 }
                 else if (packet.type === 'FULL_PROCESS_LIST') {
-                    if (activeId === id) {
-                        sessions[id].fullProcessList = packet.list;
-                        renderFullProcessList(); // 触发带有排序功能的渲染
-                    }
+                    if (activeId === id) { sessions[id].fullProcessList = packet.list; renderFullProcessList(); }
                 }
                 else if (packet.type === 'MONITOR') {
                     sessions[id].netData.shift(); sessions[id].netData.push(packet.net); sessions[id].processes = packet.processes || [];
