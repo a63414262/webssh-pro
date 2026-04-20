@@ -12,34 +12,21 @@ app.use(express.static(path.join(__dirname, 'public')));
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
 
-// ================= 【核心黑科技】：全自动 WARP 申请与点火引擎 =================
 const setupAutoWarp = () => {
     const confPath = '/usr/src/app/warp.conf';
-    
-    // 如果没有配置文件，说明是全新部署，开始自动白嫖 WARP
     if (!fs.existsSync(confPath)) {
         console.log('\x1b[33m[Auto-WARP]\x1b[0m 未检测到配置，正在全自动向 Cloudflare 申请免费 IPv6 节点...\n(这可能需要 5~10 秒，请稍候)');
         try {
-            // 1. 同意协议并注册全新的随机设备账号
             execSync('wgcf register --accept-tos', { stdio: 'ignore' });
-            // 2. 生成 WireGuard 配置文件 (wgcf-profile.conf)
             execSync('wgcf generate', { stdio: 'ignore' });
-            
-            // 3. 读取生成的配置文件
             let conf = fs.readFileSync('wgcf-profile.conf', 'utf8');
-            
-            // 4. 在配置文件末尾强制追加 SOCKS5 代理参数
             conf += '\n[Socks5]\nBindAddress = 127.0.0.1:1080\n';
-            
-            // 5. 保存为最终的 warp.conf
             fs.writeFileSync(confPath, conf);
             console.log('\x1b[32m[Auto-WARP]\x1b[0m 申请成功！已提取专属私钥与 IPv6 出口地址。');
         } catch (e) {
             console.error('\x1b[31m[Auto-WARP Error]\x1b[0m 自动申请失败 (可能被 CF 盾拦截)，IPv6 代理将暂不可用。', e.message);
         }
     }
-
-    // 点火 Wireproxy 建立本地 1080 SOCKS5 隧道
     if (fs.existsSync(confPath)) {
         console.log('\x1b[32m[System]\x1b[0m 启动 Wireproxy 引擎，IPv6 SOCKS5 隧道就绪 (Port: 1080)...');
         exec('wireproxy -c ' + confPath + ' -d', (err) => {
@@ -48,10 +35,8 @@ const setupAutoWarp = () => {
     }
 };
 
-// 引擎启动时立刻执行自动申请
 setupAutoWarp();
 
-// ======================= 下面是原有的核心逻辑，保持不变 =======================
 wss.on('connection', (ws, req) => {
     let sshClient = new Client();
     let sshStream = null;
@@ -88,24 +73,32 @@ wss.on('connection', (ws, req) => {
                     sshClient.lastRx = undefined;
                     sshClient.lastTx = undefined;
 
+                    // 【核心更新】：使用 awk 同时抓取 Mem 和 Swap，确保行数严格对齐
                     monitorInterval = setInterval(() => {
-                        const cmd = `sh -c "export LC_ALL=C; top -bn1 | grep -i -m1 'Cpu(s)' | awk '{print \\$2+\\$4}'; free | awk '/Mem:/{print \\$3/\\$2 * 100.0}'; cat /proc/net/dev | awk 'NR>2{rx+=\\$2; tx+=\\$10} END{print rx, tx}'; cat /proc/uptime | awk '{print \\$1}'; cat /proc/loadavg | awk '{print \\$1,\\$2,\\$3}'; ps -eo rss,pcpu,comm --sort=-%cpu | head -n 6"`;
+                        const cmd = `sh -c "export LC_ALL=C; top -bn1 | grep -i -m1 'Cpu(s)' | awk '{print \\$2+\\$4}'; free | awk '/Mem:/{m=\\$3/\\$2*100.0} /Swap:/{s=(\\$2>0?\\$3/\\$2*100.0:0)} END{print m; print s+0}'; cat /proc/net/dev | awk 'NR>2{rx+=\\$2; tx+=\\$10} END{print rx, tx}'; cat /proc/uptime | awk '{print \\$1}'; cat /proc/loadavg | awk '{print \\$1,\\$2,\\$3}'; ps -eo rss,pcpu,comm --sort=-%cpu | head -n 6"`;
                         sshClient.exec(cmd, (e, exStream) => {
                             if (e) return;
                             let out = '';
                             exStream.on('data', (d) => out += d.toString());
                             exStream.on('close', () => {
                                 const p = out.trim().split('\n');
-                                if (p.length >= 5) {
-                                    const cpu = parseFloat(p[0]) || 0; const mem = parseFloat(p[1]) || 0;
-                                    const netParts = p[2].split(/\s+/); const currentRx = parseFloat(netParts[0]) || 0; const currentTx = parseFloat(netParts[1]) || 0;
-                                    const uptime = parseFloat(p[3]) || 0; const load = p[4] || '0.00 0.00 0.00';
+                                if (p.length >= 6) { // 行数增加，变为 6 项基础数据
+                                    const cpu = parseFloat(p[0]) || 0; 
+                                    const mem = parseFloat(p[1]) || 0;
+                                    const swap = parseFloat(p[2]) || 0; // 新增 Swap 变量
+                                    
+                                    const netParts = p[3].split(/\s+/); 
+                                    const currentRx = parseFloat(netParts[0]) || 0; 
+                                    const currentTx = parseFloat(netParts[1]) || 0;
+                                    
+                                    const uptime = parseFloat(p[4]) || 0; 
+                                    const load = p[5] || '0.00 0.00 0.00';
                                     
                                     let rxSpeed = 0, txSpeed = 0;
                                     if (sshClient.lastRx !== undefined && currentRx >= sshClient.lastRx) { rxSpeed = (currentRx - sshClient.lastRx) / 1024 / 2; txSpeed = (currentTx - sshClient.lastTx) / 1024 / 2; }
                                     sshClient.lastRx = currentRx; sshClient.lastTx = currentTx;
 
-                                    const processLines = p.slice(5);
+                                    const processLines = p.slice(6); // 进程列表从第 7 行开始
                                     const processes = processLines.map(line => {
                                         const parts = line.trim().split(/\s+/);
                                         if(parts.length >= 3) {
@@ -114,7 +107,9 @@ wss.on('connection', (ws, req) => {
                                         }
                                         return null;
                                     }).filter(Boolean);
-                                    ws.send(JSON.stringify({ type: 'MONITOR', cpu, mem, rxSpeed: parseFloat(rxSpeed.toFixed(1)), txSpeed: parseFloat(txSpeed.toFixed(1)), uptime, load, processes }));
+                                    
+                                    // 传给前端新增 swap 字段
+                                    ws.send(JSON.stringify({ type: 'MONITOR', cpu, mem, swap, rxSpeed: parseFloat(rxSpeed.toFixed(1)), txSpeed: parseFloat(txSpeed.toFixed(1)), uptime, load, processes }));
                                 }
                             });
                         });
@@ -125,7 +120,6 @@ wss.on('connection', (ws, req) => {
                     if (ws.readyState === WebSocket.OPEN) { ws.send(JSON.stringify({ type: 'TERMINAL', data: `\r\n\x1b[31m[SSH Error]:\x1b[0m ${err.message}\r\n` })); ws.close(); }
                 });
 
-                // ================= 【智能代理劫持】 =================
                 if (creds.host.includes(':')) {
                     SocksClient.createConnection({ proxy: { ipaddress: '127.0.0.1', port: 1080, type: 5 }, command: 'connect', destination: { host: creds.host, port: creds.port } }, (err, info) => {
                         if (err) {
@@ -167,4 +161,4 @@ wss.on('connection', (ws, req) => {
 });
 
 const PORT = process.env.PORT || 8080;
-server.listen(PORT, '0.0.0.0', () => console.log(`[Running] WebOS 全自动 IPv6 版已点火，监听端口: ${PORT}`));
+server.listen(PORT, '0.0.0.0', () => console.log(`[Running] WebOS 虚拟内存探针版已点火，监听端口: ${PORT}`));
