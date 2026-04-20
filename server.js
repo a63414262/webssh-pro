@@ -50,31 +50,39 @@ wss.on('connection', (ws, req) => {
                         sendDirTree(sftpSession);
                     });
 
-                    // 初始化流量记忆变量
-                    sshClient.lastRx = -1;
+                    // 初始化双向流量记忆
+                    sshClient.lastRx = undefined;
+                    sshClient.lastTx = undefined;
 
+                    // 【核心更新】：抓取 CPU、内存、双向流量、运行时间、系统负载、以及进程列表
                     monitorInterval = setInterval(() => {
-                        const cmd = `sh -c "export LC_ALL=C; top -bn1 | grep -i -m1 'Cpu(s)' | awk '{print \\$2+\\$4}'; free | awk '/Mem:/{print \\$3/\\$2 * 100.0}'; cat /proc/net/dev | awk 'NR>2{rx+=\\$2} END{print rx}'; ps -eo rss,pcpu,comm --sort=-%cpu | head -n 6"`;
+                        const cmd = `sh -c "export LC_ALL=C; top -bn1 | grep -i -m1 'Cpu(s)' | awk '{print \\$2+\\$4}'; free | awk '/Mem:/{print \\$3/\\$2 * 100.0}'; cat /proc/net/dev | awk 'NR>2{rx+=\\$2; tx+=\\$10} END{print rx, tx}'; cat /proc/uptime | awk '{print \\$1}'; cat /proc/loadavg | awk '{print \\$1,\\$2,\\$3}'; ps -eo rss,pcpu,comm --sort=-%cpu | head -n 6"`;
                         sshClient.exec(cmd, (e, exStream) => {
                             if (e) return;
                             let out = '';
                             exStream.on('data', (d) => out += d.toString());
                             exStream.on('close', () => {
                                 const p = out.trim().split('\n');
-                                if (p.length >= 4) {
+                                if (p.length >= 5) {
                                     const cpu = parseFloat(p[0]) || 0;
                                     const mem = parseFloat(p[1]) || 0;
-                                    const currentRx = parseFloat(p[2]) || 0; // 当前总接收字节数
                                     
-                                    // 【核心修复】：计算真正的实时网速 (KB/s)
-                                    let netSpeed = 0;
-                                    if (sshClient.lastRx !== -1 && currentRx >= sshClient.lastRx) {
-                                        // 差值 / 1024 换算成 KB / 2 秒间隔 = KB/s
-                                        netSpeed = (currentRx - sshClient.lastRx) / 1024 / 2;
+                                    const netParts = p[2].split(/\s+/);
+                                    const currentRx = parseFloat(netParts[0]) || 0;
+                                    const currentTx = parseFloat(netParts[1]) || 0;
+                                    
+                                    const uptime = parseFloat(p[3]) || 0;
+                                    const load = p[4] || '0.00 0.00 0.00';
+                                    
+                                    let rxSpeed = 0, txSpeed = 0;
+                                    if (sshClient.lastRx !== undefined && currentRx >= sshClient.lastRx) {
+                                        rxSpeed = (currentRx - sshClient.lastRx) / 1024 / 2;
+                                        txSpeed = (currentTx - sshClient.lastTx) / 1024 / 2;
                                     }
-                                    sshClient.lastRx = currentRx; // 记录当前值供下次计算
+                                    sshClient.lastRx = currentRx;
+                                    sshClient.lastTx = currentTx;
 
-                                    const processLines = p.slice(4);
+                                    const processLines = p.slice(5);
                                     const processes = processLines.map(line => {
                                         const parts = line.trim().split(/\s+/);
                                         if(parts.length >= 3) {
@@ -86,8 +94,13 @@ wss.on('connection', (ws, req) => {
                                         return null;
                                     }).filter(Boolean);
                                     
-                                    // netSpeed 保留一位小数传给前端
-                                    ws.send(JSON.stringify({ type: 'MONITOR', cpu, mem, net: parseFloat(netSpeed.toFixed(1)), processes }));
+                                    ws.send(JSON.stringify({ 
+                                        type: 'MONITOR', 
+                                        cpu, mem, 
+                                        rxSpeed: parseFloat(rxSpeed.toFixed(1)), 
+                                        txSpeed: parseFloat(txSpeed.toFixed(1)), 
+                                        uptime, load, processes 
+                                    }));
                                 }
                             });
                         });
@@ -182,4 +195,4 @@ wss.on('connection', (ws, req) => {
 });
 
 const PORT = process.env.PORT || 8080;
-server.listen(PORT, '0.0.0.0', () => console.log(`[Running] WebOS 测速引擎版已点火，监听端口: ${PORT}`));
+server.listen(PORT, '0.0.0.0', () => console.log(`[Running] WebOS 集群最终全能版已点火，监听端口: ${PORT}`));
