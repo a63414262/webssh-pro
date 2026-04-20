@@ -12,54 +12,43 @@ app.use(express.static(path.join(__dirname, 'public')));
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
 
-// ================= 【内存级 Fail2Ban 防爆破拦截器】 =================
-const ipBlocklist = new Map(); // 封禁黑名单 (IP -> 解封时间戳)
-const ipAttempts = new Map();  // 失败计数器 (IP -> 失败次数)
-const MAX_ATTEMPTS = 5;        // 最大容忍错误次数
-const BLOCK_TIME = 24 * 60 * 60 * 1000; // 封禁时长：24小时
-
-// ================= 【全自动 WARP IPv6 申请与点火引擎】 =================
 const setupAutoWarp = () => {
     const confPath = '/usr/src/app/warp.conf';
     if (!fs.existsSync(confPath)) {
-        console.log('\x1b[33m[Auto-WARP]\x1b[0m 未检测到配置，正在全自动向 Cloudflare 申请免费 IPv6 节点...\n(这可能需要 5~10 秒，请稍候)');
+        console.log('\x1b[33m[Auto-WARP]\x1b[0m 未检测到配置，正在全自动申请 IPv6 节点...');
         try {
             execSync('wgcf register --accept-tos', { stdio: 'ignore' });
             execSync('wgcf generate', { stdio: 'ignore' });
             let conf = fs.readFileSync('wgcf-profile.conf', 'utf8');
             conf += '\n[Socks5]\nBindAddress = 127.0.0.1:1080\n';
             fs.writeFileSync(confPath, conf);
-            console.log('\x1b[32m[Auto-WARP]\x1b[0m 申请成功！已提取专属私钥与 IPv6 出口地址。');
+            console.log('\x1b[32m[Auto-WARP]\x1b[0m 申请成功！已提取专属私钥与 IPv6 出口。');
         } catch (e) {
-            console.error('\x1b[31m[Auto-WARP Error]\x1b[0m 自动申请失败 (可能被 CF 盾拦截)，IPv6 代理将暂不可用。', e.message);
+            console.error('\x1b[31m[Auto-WARP Error]\x1b[0m 自动申请失败:', e.message);
         }
     }
     if (fs.existsSync(confPath)) {
-        console.log('\x1b[32m[System]\x1b[0m 启动 Wireproxy 引擎，IPv6 SOCKS5 隧道就绪 (Port: 1080)...');
         exec('wireproxy -c ' + confPath + ' -d', (err) => {
-            if (err) console.error('[WARP Tunnel Error] Wireproxy 进程异常:', err);
+            if (err) console.error('[WARP Tunnel Error]', err);
         });
     }
 };
 setupAutoWarp();
 
-// ================= 【WebSocket 核心路由】 =================
+const ipBlocklist = new Map(); 
+const ipAttempts = new Map();  
+const MAX_ATTEMPTS = 5;        
+const BLOCK_TIME = 24 * 60 * 60 * 1000; 
+
 wss.on('connection', (ws, req) => {
-    // 1. 穿透云原生网关，获取真实访问 IP
     const clientIp = req.headers['x-forwarded-for'] ? req.headers['x-forwarded-for'].split(',')[0].trim() : req.socket.remoteAddress;
 
-    // 2. 绝对防御：检查 IP 是否在小黑屋中
     if (ipBlocklist.has(clientIp)) {
-        const unblockTime = ipBlocklist.get(clientIp);
-        if (Date.now() < unblockTime) {
-            // 刑期未满，直接掐断，不消耗任何 SSH 资源
-            ws.send(JSON.stringify({ type: 'TERMINAL', data: `\r\n\x1b[1;41;37m [ 绝对防御 ] \x1b[0m\x1b[31m 您的 IP (${clientIp}) 因多次爆破尝试，已被系统物理隔离 24 小时！\x1b[0m\r\n` }));
-            ws.close();
-            return;
+        if (Date.now() < ipBlocklist.get(clientIp)) {
+            ws.send(JSON.stringify({ type: 'TERMINAL', data: `\r\n\x1b[1;41;37m [ 绝对防御 ] \x1b[0m\x1b[31m IP (${clientIp}) 已被物理隔离 24 小时！\x1b[0m\r\n` }));
+            return ws.close();
         } else {
-            // 刑期已满，释放出狱
-            ipBlocklist.delete(clientIp);
-            ipAttempts.delete(clientIp);
+            ipBlocklist.delete(clientIp); ipAttempts.delete(clientIp);
         }
     }
 
@@ -81,17 +70,15 @@ wss.on('connection', (ws, req) => {
         if (!sshStream) {
             try {
                 const creds = JSON.parse(message);
-                creds.tryKeyboard = true; 
-                creds.readyTimeout = 20000;
+                creds.tryKeyboard = true; creds.readyTimeout = 20000;
 
                 sshClient.on('ready', () => {
-                    // 3. 鉴权成功：清空该 IP 的失败记录
                     ipAttempts.delete(clientIp);
 
                     sshClient.shell({ term: 'xterm-256color' }, (err, stream) => {
                         if (err) return ws.close();
                         sshStream = stream;
-                        ws.send(JSON.stringify({ type: 'TERMINAL', data: '\r\n\x1b[32m[System]\x1b[0m 🚀 OS 核心启动，终端连接成功。\r\n\r\n' }));
+                        ws.send(JSON.stringify({ type: 'TERMINAL', data: '\r\n\x1b[32m[System]\x1b[0m 🚀 OS 核心启动，终端连接成功。您可以直接将文件拖拽至此窗口进行秒传。\r\n\r\n' }));
                         stream.on('data', (d) => ws.send(JSON.stringify({ type: 'TERMINAL', data: d.toString('utf8') })));
                         stream.on('close', () => ws.close());
                     });
@@ -100,7 +87,6 @@ wss.on('connection', (ws, req) => {
 
                     sshClient.lastRx = undefined; sshClient.lastTx = undefined;
 
-                    // 高频状态探针 (CPU, RAM, SWAP, Net, Load, Processes)
                     monitorInterval = setInterval(() => {
                         const cmd = `sh -c "export LC_ALL=C; top -bn1 | grep -i -m1 'Cpu(s)' | awk '{print \\$2+\\$4}'; free | awk '/Mem:/{m=\\$3/\\$2*100.0} /Swap:/{s=(\\$2>0?\\$3/\\$2*100.0:0)} END{print m; print s+0}'; cat /proc/net/dev | awk 'NR>2{rx+=\\$2; tx+=\\$10} END{print rx, tx}'; cat /proc/uptime | awk '{print \\$1}'; cat /proc/loadavg | awk '{print \\$1,\\$2,\\$3}'; ps -eo rss,pcpu,comm --sort=-%cpu | head -n 6"`;
                         sshClient.exec(cmd, (e, exStream) => {
@@ -134,38 +120,65 @@ wss.on('connection', (ws, req) => {
                     if (prompts.length > 0 && prompts[0].prompt.toLowerCase().includes('password')) finish([creds.password]); else finish([]);
                 }).on('error', (err) => {
                     if (ws.readyState === WebSocket.OPEN) {
-                        // 4. 鉴权失败：触发 Fail2Ban 逻辑
                         if (err.message.toLowerCase().includes('authenticat') || err.message.includes('Handshake failed')) {
-                            let attempts = (ipAttempts.get(clientIp) || 0) + 1;
-                            ipAttempts.set(clientIp, attempts);
-
+                            let attempts = (ipAttempts.get(clientIp) || 0) + 1; ipAttempts.set(clientIp, attempts);
                             if (attempts >= MAX_ATTEMPTS) {
-                                ipBlocklist.set(clientIp, Date.now() + BLOCK_TIME); // 拉黑
-                                ws.send(JSON.stringify({ type: 'TERMINAL', data: `\r\n\x1b[1;41;37m [ 警报 ] \x1b[0m\x1b[31m 连续 ${MAX_ATTEMPTS} 次鉴权失败！触发防爆破保护，您的 IP 已被封禁 24 小时。\x1b[0m\r\n` }));
-                            } else {
-                                ws.send(JSON.stringify({ type: 'TERMINAL', data: `\r\n\x1b[31m[SSH 鉴权失败]:\x1b[0m 密码或私钥错误！(警告: 剩余尝试次数 ${MAX_ATTEMPTS - attempts})\r\n` }));
-                            }
-                        } else {
-                            ws.send(JSON.stringify({ type: 'TERMINAL', data: `\r\n\x1b[31m[SSH Error]:\x1b[0m ${err.message}\r\n` }));
-                        }
+                                ipBlocklist.set(clientIp, Date.now() + BLOCK_TIME);
+                                ws.send(JSON.stringify({ type: 'TERMINAL', data: `\r\n\x1b[1;41;37m [ 警报 ] \x1b[0m\x1b[31m 触发防爆破保护，您的 IP 已封禁 24 小时。\x1b[0m\r\n` }));
+                            } else ws.send(JSON.stringify({ type: 'TERMINAL', data: `\r\n\x1b[31m[SSH 鉴权失败]:\x1b[0m 密码或私钥错误！(剩余尝试: ${MAX_ATTEMPTS - attempts})\r\n` }));
+                        } else ws.send(JSON.stringify({ type: 'TERMINAL', data: `\r\n\x1b[31m[SSH Error]:\x1b[0m ${err.message}\r\n` }));
                         ws.close();
                     }
                 });
 
                 if (creds.host.includes(':')) {
                     SocksClient.createConnection({ proxy: { ipaddress: '127.0.0.1', port: 1080, type: 5 }, command: 'connect', destination: { host: creds.host, port: creds.port } }, (err, info) => {
-                        if (err) {
-                            if (ws.readyState === WebSocket.OPEN) { ws.send(JSON.stringify({ type: 'TERMINAL', data: `\r\n\x1b[31m[WARP Proxy Error]:\x1b[0m 纯 IPv6 隧道未就绪或打通失败。\r\n错误详情: ${err.message}\r\n` })); ws.close(); }
-                            return;
-                        }
+                        if (err) { if (ws.readyState === WebSocket.OPEN) { ws.send(JSON.stringify({ type: 'TERMINAL', data: `\r\n\x1b[31m[WARP Error]:\x1b[0m 隧道未就绪。\r\n` })); ws.close(); } return; }
                         creds.sock = info.socket; sshClient.connect(creds);
                     });
-                } else { sshClient.connect(creds); }
+                } else sshClient.connect(creds);
             } catch (e) { ws.close(); }
         } else {
             try {
                 const cmd = JSON.parse(message);
                 if (cmd.type === 'TERMINAL_INPUT' && sshStream) sshStream.write(cmd.data);
+                
+                // 【云端流式解压缩引擎】
+                else if (cmd.type === 'UNZIP' && sshClient) {
+                    const ext = cmd.filename.toLowerCase();
+                    let execCmd = '';
+                    if (ext.endsWith('.zip')) execCmd = `unzip -o "/root/${cmd.filename}" -d "/root/"`;
+                    else if (ext.endsWith('.tar.gz') || ext.endsWith('.tgz')) execCmd = `tar -xzf "/root/${cmd.filename}" -C "/root/"`;
+                    
+                    if (execCmd) {
+                        sshClient.exec(execCmd, (err, stream) => {
+                            if (err) return ws.send(JSON.stringify({ type: 'SYSTEM_MSG', data: `\r\n\x1b[31m[System] 解压失败: ${err.message}\x1b[0m\r\n` }));
+                            stream.on('close', () => {
+                                ws.send(JSON.stringify({ type: 'SYSTEM_MSG', data: `\r\n\x1b[32m[System] 📦 文件 ${cmd.filename} 云端解压完成！\x1b[0m\r\n` }));
+                                sendDirTree(sftpSession);
+                            });
+                        });
+                    }
+                }
+                // 【云端文件下载】
+                else if (cmd.type === 'DOWNLOAD_FILE' && sftpSession) {
+                    sftpSession.readFile(`/root/${cmd.filename}`, (err, data) => {
+                        if (err) ws.send(JSON.stringify({ type: 'SYSTEM_MSG', data: `\r\n\x1b[31m[System] 下载失败: ${err.message}\x1b[0m\r\n` }));
+                        else ws.send(JSON.stringify({ type: 'DOWNLOAD_READY', filename: cmd.filename, data: data.toString('base64') }));
+                    });
+                }
+                // 【终端黑洞秒传 (上传)】
+                else if (cmd.type === 'UPLOAD_FILE' && sftpSession) {
+                    const buffer = Buffer.from(cmd.data, 'base64');
+                    sftpSession.writeFile(`/root/${cmd.filename}`, buffer, (err) => {
+                        if (err) ws.send(JSON.stringify({ type: 'SYSTEM_MSG', data: `\r\n\x1b[31m[System] 上传失败: ${err.message}\x1b[0m\r\n` }));
+                        else {
+                            ws.send(JSON.stringify({ type: 'SYSTEM_MSG', data: `\r\n\x1b[32m[System] 🚀 终端秒传成功：已保存至 /root/${cmd.filename} \x1b[0m\r\n` }));
+                            sendDirTree(sftpSession);
+                        }
+                    });
+                }
+                
                 else if (cmd.type === 'GET_PROCESS_LIST' && sshClient) {
                     sshClient.exec(`export LC_ALL=C; ps -eo pid,user,rss,pcpu,comm,args --sort=-%cpu | head -n 101`, (e, stream) => {
                         if (e) return; let out = ''; stream.on('data', d => out += d.toString());
@@ -197,4 +210,4 @@ wss.on('connection', (ws, req) => {
 });
 
 const PORT = process.env.PORT || 8080;
-server.listen(PORT, '0.0.0.0', () => console.log(`[Running] WebOS 终极防爆破版已点火，监听端口: ${PORT}`));
+server.listen(PORT, '0.0.0.0', () => console.log(`[Running] WebOS 终极云盘与广播版已点火，端口: ${PORT}`));
