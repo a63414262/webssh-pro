@@ -1,12 +1,15 @@
+
+
+
 # 🚀 WebSSH Pro | Master OS 集群终极版
 
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
-![Version](https://img.shields.io/badge/version-4.0.0%20Ultimate-green.svg)
+![Version](https://img.shields.io/badge/version-5.0.0%20Ultimate-green.svg)
 ![Docker](https://img.shields.io/badge/docker-ready-brightgreen.svg)
 
-**WebSSH Pro** 是一个基于 Node.js 的全栈 Serverless WebSSH 客户端与服务器集群管理面板。采用前后端一体化 (All-in-One) 架构，极简部署，瞬间点火。
+**WebSSH Pro** 是一个基于 Node.js 的全栈 Serverless WebSSH 客户端与服务器集群管理面板。它打破了传统 Web 终端的极限，将你的浏览器变成一个强大的**迷你云端操作系统**。
 
-它不仅仅是一个 Web 终端，更是一个运行在浏览器里的**迷你云端操作系统**。内置全自动 WARP IPv6 穿透引擎、SFTP 资源管理、实时态势感知与进程调度，彻底颠覆传统的服务器管理体验。
+内置全自动 WARP IPv6 穿透、Fail2Ban 防爆破、SFTP 云盘化管理、黑洞拖拽秒传、上帝广播模式与电竞级实时态势感知。专为极客与批量管理多台 VPS 打造的终极运维神器。
 
 📺 **作者 YouTube 频道**: [小K分享](https://www.youtube.com/@%E5%B0%8FK%E5%88%86%E4%BA%AB)
 
@@ -14,24 +17,26 @@
 
 ## ✨ 核心黑科技 (Features)
 
-### 🌐 全自动 WARP IPv6 智能穿透 (独家)
-- **零配置**：容器启动即自动向 Cloudflare 申请免费的 WARP IPv6 节点，并建立底层的 SOCKS5 隐形隧道 (`wireproxy`)。
-- **智能劫持**：只需在登录框输入纯 IPv6 地址，系统自动识别并劫持流量穿越 WARP 隧道。完美拯救各类平台无 IPv6 网络的纯净小鸡！
+### 🛡️ 内存级 Fail2Ban 防爆破 (绝对防御)
+- **前置拦截**：将安全防线前置到 Web 路由层。当识别到同一公网 IP 连续输错 5 次 SSH 密码/私钥，系统会直接将其打入内存黑洞，物理封禁 24 小时。
+- **无损防御**：被封禁的 IP 发起的任何 WebSocket 请求会在第一步被瞬间掐断 (Drop)，绝不消耗底层服务器的 SSH 握手资源。
+
+### 🌐 全自动 WARP IPv6 智能穿透
+- **零配置点火**：容器启动即全自动向 Cloudflare 申请免费的 WARP 节点，并建立底层的 SOCKS5 隐形隧道 (`wireproxy`)。
+- **智能劫持**：登录纯 IPv6 小鸡时（如 Scaleway / Hax），系统自动识别冒号并劫持流量穿越 WARP 隧道，完美拯救各类无 IPv6 网络的纯净 Serverless 容器！
+
+### ⚡ 上帝广播与黑洞秒传 (Terminal Evolution)
+- **上帝广播模式 (Multi-Execution)**：顶部专属全局命令框，敲击一次回车，命令将同步分发到所有已连接的集群节点，批量管理神器。
+- **黑洞拖拽秒传**：摒弃传统 Zmodem (rz/sz) 断流的烦恼，**直接将本地文件拖入黑色的 Terminal 窗口**，文件瞬间转化为 Base64 流直穿 SFTP 写入 `/root`，享受秒传快感。
+
+### 📁 可视化云盘引擎 (Advanced SFTP Manager)
+- **Ace Editor 云端直编**：双击文件瞬间拉取远端代码，支持数十种语法高亮，`Ctrl+S` 热键劫持直连物理机保存。
+- **云盘化操作**：鼠标悬停文件，支持一键 **⏬ 本地下载**，以及对 `.zip / .tar.gz` 文件的 **📦 云端服务器秒解压**。
 
 ### 📊 电竞级实时态势感知 (Live Dashboard)
-- **三擎表盘**：基于 ECharts 驱动的实时 CPU、RAM、**SWAP (虚拟内存)** 独立监控环。
-- **四宫格探针**：精准显示系统运行时间 (Uptime)、系统负载 (Load)、以及精确到 KB/s 的入站/出站实时网速。
-- **心跳轮询机制**：数据每 2 秒极致刷新，多节点切换时数据状态完美隔离与记忆。
-
-### ⚙️ 动态进程调度器 (Task Manager)
-- 仿 FinalShell 的精美进程表格，右下角常驻 Top 5 资源消耗进程。
-- **全屏实时快照**：一键展开 Top 100 进程详情（PID、用户、内存、CPU、完整命令行）。
-- **纯前端排序引擎**：点击表头即可实现 CPU / 内存的无缝升降序切换。
-
-### 💻 满血版 Web 终端与资源管理 (Terminal & SFTP)
-- 基于 `xterm.js`，支持自适应窗口缩放，完美支持 ANSI 颜色与标准 Linux 快捷键。
-- **左侧可视化目录树**：支持文件/文件夹的增删改查 (CRUD)。
-- **Ace Editor 云端编辑**：双击文件瞬间拉取代码流，支持数十种语法高亮，`Ctrl+S` 热键劫持直达远端物理机保存。
+- **三擎表盘**：实时独立监控 CPU、物理内存 (RAM)、与 **虚拟内存 (SWAP)**，OOM 危机一目了然。
+- **硬核数据盘**：精准显示系统运行时间 (Uptime)、系统负载 (Load)、以及分离的入站 (RX) / 出站 (TX) 实时网速。
+- **心跳调度器 (Task Manager)**：右下角常驻 Top 5 活跃进程。一键展开全屏快照，支持纯前端无缝排序 CPU/内存，数据每 2 秒极致刷新。
 
 ---
 
@@ -39,57 +44,53 @@
 
 - **Backend**: Express, ws (WebSocket), ssh2 (纯 JS 协议栈), socks (代理劫持)
 - **Frontend**: 原生 JS/CSS, xterm.js, ECharts, Ace Editor
-- **Environment**: wgcf (WARP 自动注册), wireproxy (轻量级用户态 WireGuard)
+- **Environment**: Node.js 18, wgcf (WARP 全自动注册), wireproxy (用户态 WireGuard 引擎)
 
 ---
 
-## 🚀 极速部署 (Docker / 云原生容器部署)
+## 🚀 极速部署 (Docker / Serverless)
 
-本项目已完美适配 ClawCloud、Sealos 等 Serverless 容器平台。
+本项目已完美适配 ClawCloud、Sealos 等 Serverless 容器平台，一键起飞。
 
 ### 1. 镜像地址
-推荐直接使用 GitHub Container Registry 提供的最新自动构建镜像：
+使用 GitHub Container Registry 提供的最新自动构建镜像：
 ```text
 ghcr.io/a63414262/webssh-pro:latest
+````
 
 ### 2\. 容器基础配置要求
 
   - **CPU**: 0.2 Core \~ 0.5 Core
-  - **内存 (Memory)**: ⚠️ 至少 `512MB` (用于承载底层的 ssh2 加密运算与 wgcf 隧道，低于此值可能导致 OOM 重启)
-  - **暴露端口 (Port)**: `8080` (必须开启公网访问)
+  - **内存 (Memory)**: ⚠️ 至少需分配 `512MB` (低于此值可能导致 Node.js 内存溢出或 WARP 隧道断流)
+  - **暴露端口 (Port)**: `8080` (开启公网访问)
 
 ### 3\. 环境变量 (Environment Variables)
 
-在部署时，只需添加以下最基础的环境变量，系统将自动完成时区校准和引擎优化：
+只需添加以下三个基础变量，系统即可自动完成时区校准和 WARP 引擎初始化：
 
-
+```text
 TZ=Asia/Shanghai
 NODE_ENV=production
 PORT=8080
 ```
 
-*(注：系统会在容器启动时全自动注册并拉起 WARP 隧道，无需手动配置任何私钥！)*
-
 -----
 
-## 🔒 安全与隐私声明 (Security)
+## 🔒 隐私与安全声明 (Privacy & Security)
 
-1.  **无状态架构 (Stateless)**：本项目出于极客便携性与安全性考虑，不依赖任何外部数据库（MySQL/Redis）。所有节点状态与连接凭证（密码/私钥）仅存在于你当前浏览器的内存中。
-2.  **阅后即焚**：一旦刷新网页或关闭浏览器，所有连接信息瞬间销毁，后端绝不落地存储任何用户敏感数据。
-3.  建议在生产环境中，务必为你的访问域名开启 HTTPS (SSL) 加密，以保护 WebSocket 隧道的传输安全。
+1.  **绝对无状态 (Stateless)**：本系统不依赖任何数据库（MySQL/Redis）。所有节点连接凭证仅存在于浏览器的临时内存中。
+2.  **阅后即焚**：一旦刷新网页或关闭浏览器，所有连接与状态信息瞬间彻底销毁，后端不落地任何敏感数据。
+3.  **建议**：在生产环境中，请务必绑定域名并开启 HTTPS (SSL) 加密，以保护 WebSocket 数据隧道的传输安全。
 
 -----
 
 ## 🤝 参与贡献 (Contributing)
 
-发现 Bug 或者有更酷的极客想法？欢迎提交 Pull Request 或发起 Issue！
-如果这个项目帮助到了你，请给一个 ⭐ **Star** 支持一下！
+如果你喜欢这个充满极客精神的项目，欢迎提交 Pull Request，或者给个 ⭐ **Star** 支持一下！
 
 ## 📄 开源协议 (License)
 
 本项目基于 [MIT License](https://www.google.com/search?q=LICENSE) 开源。
 
-
-
-***
-
+```
+```
