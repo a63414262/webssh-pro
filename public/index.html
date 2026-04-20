@@ -63,13 +63,17 @@
         .pt-col-cpu { width: 40px; color: #ff4d4f; font-family: Consolas, monospace; text-align: right; }
         .pt-col-cmd { flex: 1; padding-left: 15px; color: #a0c2a8; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-        /* 【核心新增】：高级进程管理器弹窗样式 */
         #processModal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.8); z-index: 1000; justify-content: center; align-items: center; backdrop-filter: blur(5px); }
         .pm-box { background: #111813; border: 1px solid var(--accent); width: 85%; height: 85%; border-radius: 8px; display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 0 40px rgba(0,255,102,0.15); }
         .pm-header { padding: 15px 20px; background: #1a231c; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; color: #fff; font-weight: bold; font-size: 16px;}
         .pm-body { flex: 1; overflow: auto; padding: 0; background: #0a120c; }
         .pm-table-full { width: 100%; border-collapse: collapse; font-size: 13px; text-align: left; font-family: 'Segoe UI', Consolas, sans-serif;}
-        .pm-table-full th { background: #141c16; padding: 12px; border-bottom: 2px solid var(--border); position: sticky; top: 0; color: #888; }
+        
+        /* 排序表头样式优化 */
+        .pm-table-full th { background: #141c16; padding: 12px; border-bottom: 2px solid var(--border); position: sticky; top: 0; color: #888; user-select: none; }
+        .pm-table-full th.sortable:hover { color: #fff; background: #1a231c; }
+        .sort-icon { color: var(--accent); font-size: 10px; margin-left: 4px; }
+        
         .pm-table-full td { padding: 10px 12px; border-bottom: 1px solid #1a231c; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 400px; }
         .pm-table-full tr:hover { background: rgba(0, 255, 102, 0.05); }
 
@@ -103,7 +107,7 @@
     <div id="processModal">
         <div class="pm-box">
             <div class="pm-header">
-                <span>🔍 服务器进程快照 (Top 100)</span>
+                <span>🔍 服务器进程快照</span>
                 <span style="cursor:pointer; color:var(--danger); font-size: 14px; padding:4px 8px; border:1px solid var(--danger); border-radius:4px;" onclick="closeProcessModal()">✖ 关闭面板</span>
             </div>
             <div class="pm-body">
@@ -112,8 +116,8 @@
                         <tr>
                             <th style="width: 80px;">PID</th>
                             <th style="width: 100px;">用户</th>
-                            <th style="width: 100px;">内存占用</th>
-                            <th style="width: 80px;">CPU(%)</th>
+                            <th style="width: 100px; cursor: pointer;" class="sortable" onclick="sortProcessList('mem')">内存占用 <span id="sort-mem" class="sort-icon"></span></th>
+                            <th style="width: 80px; cursor: pointer;" class="sortable" onclick="sortProcessList('cpu')">CPU(%) <span id="sort-cpu" class="sort-icon">▼</span></th>
                             <th style="width: 150px;">名称</th>
                             <th>完整命令行参数</th>
                         </tr>
@@ -186,6 +190,10 @@
         const sessions = {}; 
         let activeId = null; 
 
+        // 全局排序状态
+        let currentSortCol = 'cpu';
+        let currentSortDir = 'desc';
+
         const editor = ace.edit("editorArea");
         editor.setTheme("ace/theme/twilight"); 
         editor.session.setMode("ace/mode/sh"); 
@@ -224,24 +232,84 @@
         };
         window.refreshDir = function() { if(activeId && sessions[activeId]) sessions[activeId].ws.send(JSON.stringify({ type: 'REFRESH_DIR' })); };
 
-        // 【核心新增】：进程弹窗开关控制
         window.openProcessModal = function() {
             if(!activeId || !sessions[activeId] || !sessions[activeId].ws) return;
             document.getElementById('processModal').style.display = 'flex';
             document.getElementById('fullProcessListBody').innerHTML = '<tr><td colspan="6" style="text-align:center; padding: 30px; color:#a0c2a8;">🚀 正在向服务器发送进程抓取指令...</td></tr>';
-            // 发送指令请求全量进程
             sessions[activeId].ws.send(JSON.stringify({ type: 'GET_PROCESS_LIST' }));
         };
-        window.closeProcessModal = function() {
-            document.getElementById('processModal').style.display = 'none';
+        window.closeProcessModal = function() { document.getElementById('processModal').style.display = 'none'; };
+
+        // ================= 【核心新增】：前端 JS 内存排序算法 =================
+        function parseMem(memStr) {
+            if (!memStr || memStr === '0') return 0;
+            let val = parseFloat(memStr);
+            if (memStr.includes('M')) return val * 1024; // 统一换算为 KB 用于比较
+            return val;
+        }
+
+        window.sortProcessList = function(col) {
+            if (currentSortCol === col) {
+                currentSortDir = currentSortDir === 'desc' ? 'asc' : 'desc'; // 切换升降序
+            } else {
+                currentSortCol = col;
+                currentSortDir = 'desc'; // 新列默认降序
+            }
+            
+            // 更新表头箭头 UI
+            document.getElementById('sort-mem').innerText = col === 'mem' ? (currentSortDir === 'desc' ? '▼' : '▲') : '';
+            document.getElementById('sort-cpu').innerText = col === 'cpu' ? (currentSortDir === 'desc' ? '▼' : '▲') : '';
+
+            renderFullProcessList(); // 触发重新渲染
         };
+
+        function renderFullProcessList() {
+            if (!activeId || !sessions[activeId] || !sessions[activeId].fullProcessList) return;
+            
+            // 克隆数组进行排序
+            let list = [...sessions[activeId].fullProcessList];
+            
+            list.sort((a, b) => {
+                let valA, valB;
+                if (currentSortCol === 'mem') {
+                    valA = parseMem(a.mem);
+                    valB = parseMem(b.mem);
+                } else if (currentSortCol === 'cpu') {
+                    valA = parseFloat(a.cpu) || 0;
+                    valB = parseFloat(b.cpu) || 0;
+                }
+                return currentSortDir === 'desc' ? valB - valA : valA - valB;
+            });
+
+            const tbody = document.getElementById('fullProcessListBody');
+            tbody.innerHTML = list.map(p => `
+                <tr>
+                    <td style="color:#fff;">${p.pid}</td>
+                    <td style="color:#dcb67a;">${p.user}</td>
+                    <td style="color:#ffb86c; font-family:Consolas;">${p.mem}</td>
+                    <td style="color:#ff5555; font-family:Consolas;">${p.cpu}</td>
+                    <td style="color:#8be9fd;">${p.name}</td>
+                    <td style="color:#6272a4;" title="${p.cmdline}">${p.cmdline}</td>
+                </tr>
+            `).join('');
+        }
 
         const gaugeChart = echarts.init(document.getElementById('gaugeChart'), 'dark');
         const netChart = echarts.init(document.getElementById('netChart'), 'dark');
+        
+        // ================= 【核心修复】：防止仪表盘重叠的终极参数 =================
         function resetCharts() {
             gaugeChart.setOption({ backgroundColor: 'transparent', series: [
-                { type: 'gauge', center: ['25%', '45%'], radius: '65%', progress: { show: true, width: 6 }, axisLine: { lineStyle: { width: 6 } }, axisTick: { show: false }, splitLine: { show: false }, axisLabel: { show: false }, pointer: { show: false }, detail: { valueAnimation: true, fontSize: 16, color: '#fff', formatter: '{value}%', offsetCenter: [0, '15%'] }, data: [{ value: 0, name: 'CPU' }], title: { fontSize: 12, offsetCenter: [0, '90%'], color: '#888' } },
-                { type: 'gauge', center: ['75%', '45%'], radius: '65%', progress: { show: true, width: 6, itemStyle: { color: '#007acc' } }, axisLine: { lineStyle: { width: 6 } }, axisTick: { show: false }, splitLine: { show: false }, axisLabel: { show: false }, pointer: { show: false }, detail: { valueAnimation: true, fontSize: 16, color: '#fff', formatter: '{value}%', offsetCenter: [0, '15%'] }, data: [{ value: 0, name: 'RAM' }], title: { fontSize: 12, offsetCenter: [0, '90%'], color: '#888' } }
+                { 
+                    type: 'gauge', center: ['25%', '50%'], 
+                    radius: '55%', // 彻底缩小半径，绝对不再重叠！
+                    progress: { show: true, width: 6 }, axisLine: { lineStyle: { width: 6 } }, axisTick: { show: false }, splitLine: { show: false }, axisLabel: { show: false }, pointer: { show: false }, detail: { valueAnimation: true, fontSize: 16, color: '#fff', formatter: '{value}%', offsetCenter: [0, '15%'] }, data: [{ value: 0, name: 'CPU' }], title: { fontSize: 12, offsetCenter: [0, '90%'], color: '#888' } 
+                },
+                { 
+                    type: 'gauge', center: ['75%', '50%'], 
+                    radius: '55%', // 彻底缩小半径
+                    progress: { show: true, width: 6, itemStyle: { color: '#007acc' } }, axisLine: { lineStyle: { width: 6 } }, axisTick: { show: false }, splitLine: { show: false }, axisLabel: { show: false }, pointer: { show: false }, detail: { valueAnimation: true, fontSize: 16, color: '#fff', formatter: '{value}%', offsetCenter: [0, '15%'] }, data: [{ value: 0, name: 'RAM' }], title: { fontSize: 12, offsetCenter: [0, '90%'], color: '#888' } 
+                }
             ]});
             netChart.setOption({ grid: { left: 30, right: 10, bottom: 20, top: 40 }, xAxis: { type: 'category', boundaryGap: false, data: Array(20).fill(''), show: false }, yAxis: { type: 'value', splitLine: { lineStyle: { color: '#2c3c31' } } }, series: [{ type: 'line', data: Array(20).fill(0), areaStyle: { color: 'rgba(0, 255, 102, 0.2)' }, itemStyle: { color: '#00ff66' }, smooth: true }] });
         }
@@ -250,13 +318,7 @@
         function renderProcesses(processes) {
             const container = document.getElementById('processListBody');
             if(!processes || processes.length === 0) { container.innerHTML = '<div style="padding:15px;color:#555;text-align:center;">暂无数据</div>'; return; }
-            container.innerHTML = processes.map(p => `
-                <div class="pt-row">
-                    <span class="pt-col-mem">${p.mem}</span>
-                    <span class="pt-col-cpu">${p.cpu}</span>
-                    <span class="pt-col-cmd">${p.cmd}</span>
-                </div>
-            `).join('');
+            container.innerHTML = processes.map(p => `<div class="pt-row"><span class="pt-col-mem">${p.mem}</span><span class="pt-col-cpu">${p.cpu}</span><span class="pt-col-cmd">${p.cmd}</span></div>`).join('');
         }
 
         function showLoginBox() { document.getElementById('loginOverlay').style.display = 'flex'; setTimeout(() => document.getElementById('loginOverlay').style.opacity = '1', 10); document.getElementById('closeLoginBtn').style.display = Object.keys(sessions).length > 0 ? 'block' : 'none'; }
@@ -269,7 +331,7 @@
             const termDiv = document.createElement('div'); termDiv.className = 'terminal-wrapper'; termDiv.id = `term_${id.replace(/\W/g, '_')}`; document.getElementById('terminalsContainer').appendChild(termDiv);
             const term = new Terminal({ cursorBlink: true, theme: { background: '#000', foreground: '#a0c2a8' }, fontFamily: 'Consolas' }); const fitAddon = new FitAddon.FitAddon(); term.loadAddon(fitAddon); term.open(termDiv);
 
-            sessions[id] = { id, host, ws: null, term, fitAddon, termDiv, filesHTML: '<div style="color:#666;text-align:center;">拉取目录中...</div>', netData: Array(20).fill(0), selectedNode: null, processes: [] };
+            sessions[id] = { id, host, ws: null, term, fitAddon, termDiv, filesHTML: '<div style="color:#666;text-align:center;">拉取目录中...</div>', netData: Array(20).fill(0), selectedNode: null, processes: [], fullProcessList: null };
             term.writeln('\x1b[33m[Engine]\x1b[0m 向集群分配节点中...');
             const ws = new WebSocket((window.location.protocol === 'https:' ? 'wss://' : 'ws://') + window.location.host + '/'); sessions[id].ws = ws;
 
@@ -287,20 +349,10 @@
                 else if (packet.type === 'FILE_CONTENT') {
                     if (activeId === id) { editor.setValue(packet.content, -1); editor.session.setMode(`ace/mode/${{'js':'javascript','json':'json','html':'html','css':'css','sh':'sh','bash':'sh','py':'python','yaml':'yaml','yml':'yaml','conf':'ini','xml':'xml'}[packet.filename.split('.').pop().toLowerCase()] || 'text'}`); }
                 }
-                // 【核心新增】：接收并在弹窗内渲染全量进程列表
                 else if (packet.type === 'FULL_PROCESS_LIST') {
                     if (activeId === id) {
-                        const tbody = document.getElementById('fullProcessListBody');
-                        tbody.innerHTML = packet.list.map(p => `
-                            <tr>
-                                <td style="color:#fff;">${p.pid}</td>
-                                <td style="color:#dcb67a;">${p.user}</td>
-                                <td style="color:#ffb86c; font-family:Consolas;">${p.mem}</td>
-                                <td style="color:#ff5555; font-family:Consolas;">${p.cpu}</td>
-                                <td style="color:#8be9fd;">${p.name}</td>
-                                <td style="color:#6272a4;" title="${p.cmdline}">${p.cmdline}</td>
-                            </tr>
-                        `).join('');
+                        sessions[id].fullProcessList = packet.list;
+                        renderFullProcessList(); // 触发带有排序功能的渲染
                     }
                 }
                 else if (packet.type === 'MONITOR') {
