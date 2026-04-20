@@ -53,7 +53,7 @@
         .terminal-wrapper.active { display: block; }
         
         .dashboard { flex: 1; padding: 15px; overflow-y: auto; display: flex; flex-direction: column; gap: 15px;}
-        .chart-box { height: 160px; width: 100%; flex-shrink: 0; }
+        .chart-box { height: 140px; width: 100%; flex-shrink: 0; }
 
         .system-status-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; background: #0a120c; padding: 12px; border-radius: 6px; border: 1px solid #2c3c31; flex-shrink: 0; }
         .status-item { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: #888; }
@@ -304,10 +304,13 @@
         }
 
         const gaugeChart = echarts.init(document.getElementById('gaugeChart'), 'dark');
+        
+        // 【核心更新】：配置为完美均分的 3 个仪表盘 (CPU, RAM, SWAP)
         function resetCharts() {
             gaugeChart.setOption({ backgroundColor: 'transparent', series: [
-                { type: 'gauge', center: ['25%', '50%'], radius: '55%', progress: { show: true, width: 6 }, axisLine: { lineStyle: { width: 6 } }, axisTick: { show: false }, splitLine: { show: false }, axisLabel: { show: false }, pointer: { show: false }, detail: { valueAnimation: true, fontSize: 16, color: '#fff', formatter: '{value}%', offsetCenter: [0, '15%'] }, data: [{ value: 0, name: 'CPU' }], title: { fontSize: 12, offsetCenter: [0, '90%'], color: '#888' } },
-                { type: 'gauge', center: ['75%', '50%'], radius: '55%', progress: { show: true, width: 6, itemStyle: { color: '#007acc' } }, axisLine: { lineStyle: { width: 6 } }, axisTick: { show: false }, splitLine: { show: false }, axisLabel: { show: false }, pointer: { show: false }, detail: { valueAnimation: true, fontSize: 16, color: '#fff', formatter: '{value}%', offsetCenter: [0, '15%'] }, data: [{ value: 0, name: 'RAM' }], title: { fontSize: 12, offsetCenter: [0, '90%'], color: '#888' } }
+                { type: 'gauge', center: ['17%', '50%'], radius: '55%', progress: { show: true, width: 5 }, axisLine: { lineStyle: { width: 5 } }, axisTick: { show: false }, splitLine: { show: false }, axisLabel: { show: false }, pointer: { show: false }, detail: { valueAnimation: true, fontSize: 13, color: '#fff', formatter: '{value}%', offsetCenter: [0, '15%'] }, data: [{ value: 0, name: 'CPU' }], title: { fontSize: 11, offsetCenter: [0, '85%'], color: '#888' } },
+                { type: 'gauge', center: ['50%', '50%'], radius: '55%', progress: { show: true, width: 5, itemStyle: { color: '#007acc' } }, axisLine: { lineStyle: { width: 5 } }, axisTick: { show: false }, splitLine: { show: false }, axisLabel: { show: false }, pointer: { show: false }, detail: { valueAnimation: true, fontSize: 13, color: '#fff', formatter: '{value}%', offsetCenter: [0, '15%'] }, data: [{ value: 0, name: 'RAM' }], title: { fontSize: 11, offsetCenter: [0, '85%'], color: '#888' } },
+                { type: 'gauge', center: ['83%', '50%'], radius: '55%', progress: { show: true, width: 5, itemStyle: { color: '#ff9800' } }, axisLine: { lineStyle: { width: 5 } }, axisTick: { show: false }, splitLine: { show: false }, axisLabel: { show: false }, pointer: { show: false }, detail: { valueAnimation: true, fontSize: 13, color: '#fff', formatter: '{value}%', offsetCenter: [0, '15%'] }, data: [{ value: 0, name: 'SWAP' }], title: { fontSize: 11, offsetCenter: [0, '85%'], color: '#888' } }
             ]});
         }
         resetCharts();
@@ -328,7 +331,8 @@
             const termDiv = document.createElement('div'); termDiv.className = 'terminal-wrapper'; termDiv.id = `term_${id.replace(/\W/g, '_')}`; document.getElementById('terminalsContainer').appendChild(termDiv);
             const term = new Terminal({ cursorBlink: true, theme: { background: '#000', foreground: '#a0c2a8' }, fontFamily: 'Consolas' }); const fitAddon = new FitAddon.FitAddon(); term.loadAddon(fitAddon); term.open(termDiv);
 
-            sessions[id] = { id, host, ws: null, term, fitAddon, termDiv, filesHTML: '<div style="color:#666;text-align:center;">拉取目录中...</div>', selectedNode: null, processes: [], fullProcessList: null, rxSpeed: 0, txSpeed: 0, uptime: 0, load: '0.00 0.00 0.00' };
+            // 【增加状态机字段】 swap
+            sessions[id] = { id, host, ws: null, term, fitAddon, termDiv, filesHTML: '<div style="color:#666;text-align:center;">拉取目录中...</div>', selectedNode: null, processes: [], fullProcessList: null, rxSpeed: 0, txSpeed: 0, uptime: 0, load: '0.00 0.00 0.00', swap: 0 };
             term.writeln('\x1b[33m[Engine]\x1b[0m 向集群分配节点中...');
             const ws = new WebSocket((window.location.protocol === 'https:' ? 'wss://' : 'ws://') + window.location.host + '/'); sessions[id].ws = ws;
 
@@ -355,9 +359,16 @@
                     sessions[id].txSpeed = packet.txSpeed;
                     sessions[id].uptime = packet.uptime;
                     sessions[id].load = packet.load;
+                    sessions[id].swap = packet.swap; // 记录 swap
 
                     if(activeId === id) {
-                        gaugeChart.setOption({ series: [{ data: [{ value: packet.cpu.toFixed(1), name: 'CPU' }] }, { data: [{ value: packet.mem.toFixed(1), name: 'RAM' }] }] });
+                        // 【将第三个表盘数据推入】
+                        gaugeChart.setOption({ series: [
+                            { data: [{ value: packet.cpu.toFixed(1), name: 'CPU' }] }, 
+                            { data: [{ value: packet.mem.toFixed(1), name: 'RAM' }] },
+                            { data: [{ value: (packet.swap || 0).toFixed(1), name: 'SWAP' }] }
+                        ] });
+                        
                         renderProcesses(sessions[id].processes);
                         document.getElementById('sysUptime').innerText = formatUptime(sessions[id].uptime);
                         document.getElementById('sysLoad').innerText = sessions[id].load;
@@ -375,6 +386,13 @@
             if(!sessions[id]) return; activeId = id; document.querySelectorAll('.terminal-wrapper').forEach(el => el.classList.remove('active')); sessions[id].termDiv.classList.add('active');
             setTimeout(() => sessions[id].fitAddon.fit(), 50); document.getElementById('currentFileHost').innerText = sessions[id].host; document.getElementById('currentTermHost').innerText = sessions[id].id;
             
+            // 切换节点时更新表盘
+            gaugeChart.setOption({ series: [
+                { data: [{ value: (sessions[id].cpu || 0).toFixed(1), name: 'CPU' }] }, 
+                { data: [{ value: (sessions[id].mem || 0).toFixed(1), name: 'RAM' }] },
+                { data: [{ value: (sessions[id].swap || 0).toFixed(1), name: 'SWAP' }] }
+            ] });
+
             renderProcesses(sessions[id].processes);
             document.getElementById('sysUptime').innerText = formatUptime(sessions[id].uptime);
             document.getElementById('sysLoad').innerText = sessions[id].load || '--';
