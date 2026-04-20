@@ -55,26 +55,51 @@
 
 ## 🚀 极速部署 (Installation & Usage)
 
-### 1. 环境准备
-确保你的服务器或本地环境已安装 [Node.js](https://nodejs.org/) (推荐 v14+)。
+啊，原来你用的是这个图形化的 **App Launchpad (应用启动台)**！这是典型的基于 Kubernetes 的云原生容器部署界面（类似于 Sealos 的逻辑）。
 
-### 2. 克隆与安装
-```bash
-git clone [https://github.com/YourUsername/webssh-master-os.git](https://github.com/YourUsername/webssh-master-os.git)
-cd webssh-master-os
-npm install
-````
+在这个界面部署超级爽，完全不需要敲命令，只要把我们之前推送到 GitHub 的镜像地址填进去就行了。
 
-### 3\. 引擎点火
+请对着你的屏幕，按照下面这 **5 步“填空题”** 依次填写：
 
-```bash
-npm start
-# 或者直接运行: node server.js
+### 📝 第 1 步：Application Name (应用名称)
+* 随便起个名字，但**只能用小写字母和减号**。
+* 建议填写：`webssh-pro`
+
+### 🐳 第 2 步：Image (镜像配置)
+这是最核心的一步，告诉平台去哪里拉取你的代码：
+* 单选框选择：**🔘 Public** (因为我们之前在 GitHub Packages 里把它设为公开了)。
+* **Image Name (镜像名称)** 填入你完整的 GitHub 镜像地址：
+  ```text
+  ghcr.io/a63414262/webssh-pro:latest
+  ```
+
+### ⚙️ 第 3 步：Usage (资源配置)
+往下滚动（虽然截图中没完全展示，但下面肯定有拉杆或者输入框填 CPU 和内存）：
+* 选择 **🔘 Fixed** (固定资源，防止按量计费超标)。
+* **CPU**：拉到 `0.2 Core` 或者 `0.5 Core` 即可（Node.js 不吃 CPU）。
+* **Memory (内存)**：⚠️ **必须要给到 `512 MB`**（或者 0.5 GB）。绝对不要给 128MB，否则应用在启动瞬间就会因为内存不足被系统强杀。
+
+### 🌐 第 4 步：Network / Ports (网络与端口)
+继续往下滚，一定会有一个填写端口的地方：
+* **Container Port (容器端口)**：填入 **`8080`**。
+* **Public Access / Ingress (外网访问)**：找到这个开关，**把它打开！** 平台会自动分配一个带 `https://` 的公网域名给你，这就是你以后访问面板的网址。
+
+### 🌍 第 5 步：Environment Variables (环境变量)
+在环境变量设置区，把咱们刚才说好的“三剑客”配置填进去：
+```text
+TZ=Asia/Shanghai
+NODE_ENV=production
+PORT=8080
 ```
 
-### 4\. 访问面板
+---
 
-打开浏览器，访问：`http://localhost:8080` (如果是云服务器，请访问 `http://<你的公网IP>:8080`)。
+### 🚀 发射！
+全部填完后，点击右上角那个黑色的 **[Deploy Application]** 按钮。
+
+系统会自动开始拉取你的 `ghcr.io` 镜像并启动。稍微等个几十秒，等状态变成绿色的 `Running`，直接点击它提供给你的外网链接。
+
+你亲手打磨的“集群终极版 Web OS”，就正式在全球公网上线了！享受这极客般的成就感吧！
 
 -----
 
