@@ -20,7 +20,8 @@
         .header { height: 45px; background: #0a120c; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; padding: 0 20px; }
         .header .logo { color: var(--accent); font-weight: bold; font-size: 16px; text-shadow: 0 0 10px rgba(0,255,102,0.3); }
         
-        .desktop { flex: 1; display: grid; grid-template-columns: 260px 1fr 280px; overflow: hidden; }
+        /* 【核心更新】：右侧仪表盘加宽到了 350px，为了完美容纳原生探针文本不换行 */
+        .desktop { flex: 1; display: grid; grid-template-columns: 260px 1fr 350px; overflow: hidden; }
         .panel { background: var(--panel); border-right: 1px solid var(--border); display: flex; flex-direction: column; overflow: hidden;}
         .panel-title { padding: 8px 15px; font-size: 12px; font-weight: bold; background: #141c16; border-bottom: 1px solid var(--border); color: #fff; display: flex; justify-content: space-between; align-items: center;}
         .add-btn { cursor: pointer; color: var(--accent); background: rgba(0,255,102,0.1); padding: 2px 8px; border-radius: 4px; border: 1px solid var(--accent); transition: 0.2s;}
@@ -33,7 +34,6 @@
         .server-item .close-btn { color: #555; font-weight: bold; }
         .server-item .close-btn:hover { color: var(--danger); }
 
-        /* 文件操作按钮组排版优化 */
         .file-actions { display: flex; gap: 8px; }
         .file-actions span { cursor: pointer; transition: 0.2s; opacity: 0.7; font-size: 13px; }
         .file-actions span:hover { opacity: 1; color: var(--accent); transform: scale(1.1); }
@@ -53,8 +53,26 @@
         .terminal-wrapper { position: absolute; inset: 0; padding: 5px 10px; display: none; }
         .terminal-wrapper.active { display: block; }
         
-        .dashboard { padding: 15px; overflow-y: auto; display: flex; flex-direction: column; gap: 20px;}
-        .chart-box { height: 180px; width: 100%; }
+        .dashboard { flex: 1; padding: 15px; overflow-y: auto; display: flex; flex-direction: column; gap: 15px;}
+        .chart-box { height: 160px; width: 100%; flex-shrink: 0; }
+
+        /* 【核心新增】：原生命令回显黑框样式 */
+        #rawCmdDisplay {
+            background: #0a120c; 
+            color: #00ff66; 
+            border: 1px solid #2c3c31; 
+            border-radius: 4px; 
+            padding: 10px; 
+            font-family: Consolas, monospace; 
+            font-size: 11px; 
+            white-space: pre; 
+            overflow-x: auto; 
+            overflow-y: auto; 
+            flex: 1; 
+            min-height: 180px; 
+            line-height: 1.4;
+            box-shadow: inset 0 0 10px rgba(0,0,0,0.8);
+        }
 
         #loginOverlay { position: absolute; inset: 0; background: rgba(0,0,0,0.85); backdrop-filter: blur(5px); display: flex; justify-content: center; align-items: center; z-index: 999; transition: opacity 0.3s; }
         .login-box { background: #161e18; border: 1px solid var(--accent); padding: 30px; width: 400px; border-radius: 8px; box-shadow: 0 0 30px rgba(0,255,102,0.1); display: grid; gap: 15px; }
@@ -124,7 +142,10 @@
             <div class="panel-title">📊 实时态势感知</div>
             <div class="dashboard">
                 <div id="gaugeChart" class="chart-box"></div>
-                <div id="netChart" class="chart-box" style="height: 220px;"></div>
+                <div id="netChart" class="chart-box" style="height: 160px;"></div>
+                
+                <div style="color:#888; font-size:12px; margin-bottom:-5px; border-top:1px solid var(--border); padding-top:10px;">📟 探针原生回显</div>
+                <div id="rawCmdDisplay">Waiting for probe data...</div>
             </div>
         </div>
     </div>
@@ -161,7 +182,6 @@
             }, 500);
         };
 
-        // ================= 【核心】：全能增删改查逻辑 =================
         window.createNode = function(type) {
             if(!activeId || !sessions[activeId] || !sessions[activeId].ws) return alert('请先连接并选择一个活跃节点');
             const name = prompt(`请输入新${type === 'file' ? '文件' : '文件夹'}名称：`);
@@ -186,11 +206,9 @@
             const node = sessions[activeId].selectedNode;
             if(!node) return alert('请先在下方列表中【单击】选中一个需要删除的文件或文件夹。');
             
-            // 危险操作二次确认
             if(confirm(`⚠️ 危险操作警报！\n确定要永久删除 ${node.isDir ? '文件夹' : '文件'} [ ${node.name} ] 吗？\n(注: SFTP协议仅支持删除空文件夹)`)) {
                 sessions[activeId].ws.send(JSON.stringify({ type: 'DELETE_NODE', filename: node.name, isDir: node.isDir }));
                 
-                // 如果恰好删除了正在编辑的文件，清空编辑器状态
                 if (!node.isDir && document.getElementById('currentFileName').innerText === node.name) {
                     document.getElementById('currentFileName').innerText = 'None';
                     editor.setValue('// ⚠️ 目标文件已被删除...', -1);
@@ -249,12 +267,13 @@
             term.loadAddon(fitAddon);
             term.open(termDiv);
 
-            // 【核心】：新增 selectedNode 字段存储当前选中文件
+            // 【核心】：新增 cmdOut 字段保存每个节点独立的原生回显
             sessions[id] = { 
                 id, host, ws: null, term, fitAddon, termDiv, 
                 filesHTML: '<div style="color:#666;text-align:center;">拉取目录中...</div>', 
                 netData: Array(20).fill(0),
-                selectedNode: null 
+                selectedNode: null,
+                cmdOut: 'Waiting for probe data...' 
             };
             term.writeln('\x1b[33m[Engine]\x1b[0m 向集群分配节点中...');
 
@@ -284,11 +303,9 @@
                     sessions[id].filesHTML = packet.files.map(f => {
                         const icon = f.isDir ? '<span class="icon-dir">📁</span>' : '<span class="icon-file">📄</span>';
                         const dblclick = f.isDir ? '' : `ondblclick="openFile('${f.name}')"`;
-                        // 【核心改动】：把文件名和是否文件夹传给 onclick
                         return `<div class="file-item" onclick="selectFileDom(this, '${f.name}', ${f.isDir})" ${dblclick}>${icon} ${f.name}</div>`;
                     }).join('');
                     
-                    // 如果刷新目录导致原本选中的文件消失，清空选中状态
                     if(sessions[id].selectedNode && !packet.files.some(f => f.name === sessions[id].selectedNode.name)) {
                         sessions[id].selectedNode = null;
                     }
@@ -304,9 +321,13 @@
                 }
                 else if (packet.type === 'MONITOR') {
                     sessions[id].netData.shift(); sessions[id].netData.push(packet.net);
+                    sessions[id].cmdOut = packet.cmdOut; // 存入状态机
+
                     if(activeId === id) {
                         gaugeChart.setOption({ series: [{ data: [{ value: packet.cpu.toFixed(1), name: 'CPU' }] }, { data: [{ value: packet.mem.toFixed(1), name: 'RAM' }] }] });
                         netChart.setOption({ series: [{ data: sessions[id].netData }] });
+                        // 【渲染原生输出】
+                        if(packet.cmdOut) document.getElementById('rawCmdDisplay').innerText = packet.cmdOut;
                     }
                 }
             };
@@ -318,12 +339,11 @@
             renderServerList();
         }
 
-        // ================= 【核心】：单击记录选中状态 =================
         window.selectFileDom = function(el, name, isDir) {
             document.querySelectorAll('.file-item').forEach(e => e.classList.remove('selected'));
             el.classList.add('selected');
             if (activeId && sessions[activeId]) {
-                sessions[activeId].selectedNode = { name, isDir }; // 存储选中目标
+                sessions[activeId].selectedNode = { name, isDir }; 
             }
         };
 
@@ -335,6 +355,10 @@
             setTimeout(() => sessions[id].fitAddon.fit(), 50);
             document.getElementById('currentFileHost').innerText = sessions[id].host;
             document.getElementById('currentTermHost').innerText = sessions[id].id;
+            
+            // 【核心】：切换节点时，同步切换并渲染该节点独立的原生命令状态！
+            document.getElementById('rawCmdDisplay').innerText = sessions[id].cmdOut || 'Waiting for probe data...';
+            
             renderServerList(); updateActiveUI();
         }
 
@@ -347,7 +371,7 @@
             if(activeId === id) {
                 const remaining = Object.keys(sessions);
                 if(remaining.length > 0) switchSession(remaining[0]);
-                else { activeId = null; document.getElementById('currentFileHost').innerText = 'None'; document.getElementById('currentTermHost').innerText = 'bash'; document.getElementById('fileManager').innerHTML = '无连接的节点'; resetCharts(); showLoginBox(); }
+                else { activeId = null; document.getElementById('currentFileHost').innerText = 'None'; document.getElementById('currentTermHost').innerText = 'bash'; document.getElementById('fileManager').innerHTML = '无连接的节点'; document.getElementById('rawCmdDisplay').innerText = 'System Offline.'; resetCharts(); showLoginBox(); }
             }
             renderServerList();
         }
@@ -366,7 +390,6 @@
         function updateActiveUI() { 
             if(activeId && sessions[activeId]) {
                 document.getElementById('fileManager').innerHTML = sessions[activeId].filesHTML;
-                // 恢复选中样式
                 if(sessions[activeId].selectedNode) {
                     const items = document.querySelectorAll('.file-item');
                     for(let i=0; i<items.length; i++) {
