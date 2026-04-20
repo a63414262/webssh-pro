@@ -1,3 +1,14 @@
+看到你的截图了！在某些特定的编辑器或旧版网页里，Markdown 的多级列表和加粗符号如果没有严格的空行，确实容易渲染成纯文本。
+
+而且更重要的是，**我们这个项目现在已经进化成了真正的“终极完全体”**（加入了全自动 WARP IPv6 穿透、三引擎表盘、实时心跳进程表），原来的介绍早就配不上它现在的强大了！
+
+我为你重新编写了一份**排版绝对标准、且包含所有最新黑科技特性**的 GitHub README 模板。这次采用了最严谨的 GitHub Flavored Markdown 语法，保证在任何地方都能完美渲染。
+
+直接复制以下全部代码，替换掉你仓库里的 `README.md`：
+
+-----
+
+````markdown
 # 🚀 WebSSH Pro | Master OS 集群终极版
 
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
@@ -51,3 +62,46 @@
 推荐直接使用 GitHub Container Registry 提供的最新自动构建镜像：
 ```text
 ghcr.io/a63414262/webssh-pro:latest
+````
+
+### 2\. 容器基础配置要求
+
+  - **CPU**: 0.2 Core \~ 0.5 Core
+  - **内存 (Memory)**: ⚠️ 至少 `512MB` (用于承载底层的 ssh2 加密运算与 wgcf 隧道，低于此值可能导致 OOM 重启)
+  - **暴露端口 (Port)**: `8080` (必须开启公网访问)
+
+### 3\. 环境变量 (Environment Variables)
+
+在部署时，只需添加以下最基础的环境变量，系统将自动完成时区校准和引擎优化：
+
+```text
+TZ=Asia/Shanghai
+NODE_ENV=production
+PORT=8080
+```
+
+*(注：系统会在容器启动时全自动注册并拉起 WARP 隧道，无需手动配置任何私钥！)*
+
+-----
+
+## 🔒 安全与隐私声明 (Security)
+
+1.  **无状态架构 (Stateless)**：本项目出于极客便携性与安全性考虑，不依赖任何外部数据库（MySQL/Redis）。所有节点状态与连接凭证（密码/私钥）仅存在于你当前浏览器的内存中。
+2.  **阅后即焚**：一旦刷新网页或关闭浏览器，所有连接信息瞬间销毁，后端绝不落地存储任何用户敏感数据。
+3.  建议在生产环境中，务必为你的访问域名开启 HTTPS (SSL) 加密，以保护 WebSocket 隧道的传输安全。
+
+-----
+
+## 🤝 参与贡献 (Contributing)
+
+发现 Bug 或者有更酷的极客想法？欢迎提交 Pull Request 或发起 Issue！
+如果这个项目帮助到了你，请给一个 ⭐ **Star** 支持一下！
+
+## 📄 开源协议 (License)
+
+本项目基于 [MIT License](https://www.google.com/search?q=LICENSE) 开源。
+
+```
+
+***
+
