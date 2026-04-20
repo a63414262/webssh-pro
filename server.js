@@ -50,16 +50,21 @@ wss.on('connection', (ws, req) => {
                         sendDirTree(sftpSession);
                     });
 
+                    // 【核心更新】：获取图表数据的同时，直接抓取原生的系统与内存状态输出！
                     monitorInterval = setInterval(() => {
-                        const cmd = `sh -c "top -bn1 | grep 'Cpu(s)' | awk '{print \\$2+\\$4}'; free | awk '/Mem:/{print \\$3/\\$2 * 100.0}'; cat /proc/net/dev | grep eth0 | awk '{print \\$2, \\$10}'"`;
+                        const cmd = `sh -c "export LC_ALL=C; top -bn1 | grep -i -m1 'Cpu(s)' | awk '{print \\$2+\\$4}'; free | awk '/Mem:/{print \\$3/\\$2 * 100.0}'; cat /proc/net/dev | awk 'NR>2{rx+=\\$2} END{print rx}'; echo '[ System & CPU Load ]'; top -bn1 | head -n 3; echo ''; echo '[ Memory & Swap Usage ]'; free -h"`;
                         sshClient.exec(cmd, (e, exStream) => {
                             if (e) return;
                             let out = '';
                             exStream.on('data', (d) => out += d.toString());
                             exStream.on('close', () => {
                                 const p = out.trim().split('\n');
-                                if (p.length >= 2) {
-                                    ws.send(JSON.stringify({ type: 'MONITOR', cpu: parseFloat(p[0]) || 0, mem: parseFloat(p[1]) || 0, net: Math.floor(Math.random() * 500) }));
+                                if (p.length >= 3) {
+                                    const cpu = parseFloat(p[0]) || 0;
+                                    const mem = parseFloat(p[1]) || 0;
+                                    const net = parseFloat(p[2]) || 0;
+                                    const cmdOut = p.slice(3).join('\n'); // 提取原生命令回显
+                                    ws.send(JSON.stringify({ type: 'MONITOR', cpu, mem, net, cmdOut }));
                                 }
                             });
                         });
@@ -115,7 +120,6 @@ wss.on('connection', (ws, req) => {
                         }
                     });
                 }
-                // 【新增：处理删除请求】
                 else if (cmd.type === 'DELETE_NODE' && sftpSession) {
                     const targetPath = `/root/${cmd.filename}`;
                     if (cmd.isDir) {
@@ -136,7 +140,6 @@ wss.on('connection', (ws, req) => {
                         });
                     }
                 }
-                // 【新增：处理重命名请求】
                 else if (cmd.type === 'RENAME_NODE' && sftpSession) {
                     sftpSession.rename(`/root/${cmd.oldName}`, `/root/${cmd.newName}`, (err) => {
                         if (err) ws.send(JSON.stringify({ type: 'SYSTEM_MSG', data: `\r\n\x1b[31m[System] 重命名失败: ${err.message}\x1b[0m\r\n` }));
@@ -162,4 +165,4 @@ wss.on('connection', (ws, req) => {
 });
 
 const PORT = process.env.PORT || 8080;
-server.listen(PORT, '0.0.0.0', () => console.log(`[Running] WebOS 集群全能版已点火，监听端口: ${PORT}`));
+server.listen(PORT, '0.0.0.0', () => console.log(`[Running] WebOS 集群探针回显版已点火，监听端口: ${PORT}`));
