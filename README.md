@@ -62,7 +62,7 @@ ghcr.io/a63414262/webssh-pro:latest
 
 在部署时，只需添加以下最基础的环境变量，系统将自动完成时区校准和引擎优化：
 
-```text
+
 TZ=Asia/Shanghai
 NODE_ENV=production
 PORT=8080
