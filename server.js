@@ -50,7 +50,9 @@ wss.on('connection', (ws, req) => {
                         sendDirTree(sftpSession);
                     });
 
-                    // 常规循环探针 (取 Top 5)
+                    // 初始化流量记忆变量
+                    sshClient.lastRx = -1;
+
                     monitorInterval = setInterval(() => {
                         const cmd = `sh -c "export LC_ALL=C; top -bn1 | grep -i -m1 'Cpu(s)' | awk '{print \\$2+\\$4}'; free | awk '/Mem:/{print \\$3/\\$2 * 100.0}'; cat /proc/net/dev | awk 'NR>2{rx+=\\$2} END{print rx}'; ps -eo rss,pcpu,comm --sort=-%cpu | head -n 6"`;
                         sshClient.exec(cmd, (e, exStream) => {
@@ -62,7 +64,16 @@ wss.on('connection', (ws, req) => {
                                 if (p.length >= 4) {
                                     const cpu = parseFloat(p[0]) || 0;
                                     const mem = parseFloat(p[1]) || 0;
-                                    const net = parseFloat(p[2]) || 0;
+                                    const currentRx = parseFloat(p[2]) || 0; // 当前总接收字节数
+                                    
+                                    // 【核心修复】：计算真正的实时网速 (KB/s)
+                                    let netSpeed = 0;
+                                    if (sshClient.lastRx !== -1 && currentRx >= sshClient.lastRx) {
+                                        // 差值 / 1024 换算成 KB / 2 秒间隔 = KB/s
+                                        netSpeed = (currentRx - sshClient.lastRx) / 1024 / 2;
+                                    }
+                                    sshClient.lastRx = currentRx; // 记录当前值供下次计算
+
                                     const processLines = p.slice(4);
                                     const processes = processLines.map(line => {
                                         const parts = line.trim().split(/\s+/);
@@ -74,7 +85,9 @@ wss.on('connection', (ws, req) => {
                                         }
                                         return null;
                                     }).filter(Boolean);
-                                    ws.send(JSON.stringify({ type: 'MONITOR', cpu, mem, net, processes }));
+                                    
+                                    // netSpeed 保留一位小数传给前端
+                                    ws.send(JSON.stringify({ type: 'MONITOR', cpu, mem, net: parseFloat(netSpeed.toFixed(1)), processes }));
                                 }
                             });
                         });
@@ -95,8 +108,6 @@ wss.on('connection', (ws, req) => {
             try {
                 const cmd = JSON.parse(message);
                 if (cmd.type === 'TERMINAL_INPUT' && sshStream) sshStream.write(cmd.data);
-                
-                // 【核心新增】：抓取全量进程列表 (按 CPU 占用排序前 100)
                 else if (cmd.type === 'GET_PROCESS_LIST' && sshClient) {
                     const psCmd = `export LC_ALL=C; ps -eo pid,user,rss,pcpu,comm,args --sort=-%cpu | head -n 101`;
                     sshClient.exec(psCmd, (e, stream) => {
@@ -104,7 +115,7 @@ wss.on('connection', (ws, req) => {
                         let out = '';
                         stream.on('data', d => out += d.toString());
                         stream.on('close', () => {
-                            const lines = out.trim().split('\n').slice(1); // 掐掉表头
+                            const lines = out.trim().split('\n').slice(1);
                             const list = lines.map(line => {
                                 const parts = line.trim().split(/\s+/);
                                 if (parts.length < 6) return null;
@@ -124,7 +135,6 @@ wss.on('connection', (ws, req) => {
                         });
                     });
                 }
-                
                 else if (cmd.type === 'READ_FILE' && sftpSession) {
                     sftpSession.readFile(`/root/${cmd.filename}`, 'utf8', (err, data) => {
                         if (err) ws.send(JSON.stringify({ type: 'FILE_CONTENT', filename: cmd.filename, content: `// 读取失败: ${err.message}` }));
@@ -172,4 +182,4 @@ wss.on('connection', (ws, req) => {
 });
 
 const PORT = process.env.PORT || 8080;
-server.listen(PORT, '0.0.0.0', () => console.log(`[Running] WebOS 集群最终版已点火，监听端口: ${PORT}`));
+server.listen(PORT, '0.0.0.0', () => console.log(`[Running] WebOS 测速引擎版已点火，监听端口: ${PORT}`));
