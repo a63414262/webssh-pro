@@ -20,8 +20,7 @@
         .header { height: 45px; background: #0a120c; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; padding: 0 20px; }
         .header .logo { color: var(--accent); font-weight: bold; font-size: 16px; text-shadow: 0 0 10px rgba(0,255,102,0.3); }
         
-        /* 【核心更新】：右侧仪表盘加宽到了 350px，为了完美容纳原生探针文本不换行 */
-        .desktop { flex: 1; display: grid; grid-template-columns: 260px 1fr 350px; overflow: hidden; }
+        .desktop { flex: 1; display: grid; grid-template-columns: 260px 1fr 300px; overflow: hidden; }
         .panel { background: var(--panel); border-right: 1px solid var(--border); display: flex; flex-direction: column; overflow: hidden;}
         .panel-title { padding: 8px 15px; font-size: 12px; font-weight: bold; background: #141c16; border-bottom: 1px solid var(--border); color: #fff; display: flex; justify-content: space-between; align-items: center;}
         .add-btn { cursor: pointer; color: var(--accent); background: rgba(0,255,102,0.1); padding: 2px 8px; border-radius: 4px; border: 1px solid var(--accent); transition: 0.2s;}
@@ -56,23 +55,15 @@
         .dashboard { flex: 1; padding: 15px; overflow-y: auto; display: flex; flex-direction: column; gap: 15px;}
         .chart-box { height: 160px; width: 100%; flex-shrink: 0; }
 
-        /* 【核心新增】：原生命令回显黑框样式 */
-        #rawCmdDisplay {
-            background: #0a120c; 
-            color: #00ff66; 
-            border: 1px solid #2c3c31; 
-            border-radius: 4px; 
-            padding: 10px; 
-            font-family: Consolas, monospace; 
-            font-size: 11px; 
-            white-space: pre; 
-            overflow-x: auto; 
-            overflow-y: auto; 
-            flex: 1; 
-            min-height: 180px; 
-            line-height: 1.4;
-            box-shadow: inset 0 0 10px rgba(0,0,0,0.8);
-        }
+        /* 【核心新增】：精美的进程管理表格 UI */
+        .process-table { font-size: 12px; background: #0a120c; border: 1px solid #2c3c31; border-radius: 4px; overflow: hidden; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; flex: 1; min-height: 150px;}
+        .pt-header { display: flex; background: #1a231c; padding: 8px 10px; color: #888; border-bottom: 1px solid #2c3c31; font-weight: bold; }
+        .pt-row { display: flex; padding: 6px 10px; border-bottom: 1px solid #141c16; transition: background 0.2s; }
+        .pt-row:hover { background: rgba(255,255,255,0.05); }
+        .pt-row:last-child { border-bottom: none; }
+        .pt-col-mem { width: 60px; color: #dcb67a; font-family: Consolas, monospace; }
+        .pt-col-cpu { width: 40px; color: #ff4d4f; font-family: Consolas, monospace; text-align: right; }
+        .pt-col-cmd { flex: 1; padding-left: 15px; color: #a0c2a8; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
         #loginOverlay { position: absolute; inset: 0; background: rgba(0,0,0,0.85); backdrop-filter: blur(5px); display: flex; justify-content: center; align-items: center; z-index: 999; transition: opacity 0.3s; }
         .login-box { background: #161e18; border: 1px solid var(--accent); padding: 30px; width: 400px; border-radius: 8px; box-shadow: 0 0 30px rgba(0,255,102,0.1); display: grid; gap: 15px; }
@@ -144,8 +135,17 @@
                 <div id="gaugeChart" class="chart-box"></div>
                 <div id="netChart" class="chart-box" style="height: 160px;"></div>
                 
-                <div style="color:#888; font-size:12px; margin-bottom:-5px; border-top:1px solid var(--border); padding-top:10px;">📟 探针原生回显</div>
-                <div id="rawCmdDisplay">Waiting for probe data...</div>
+                <div style="color:#888; font-size:12px; margin-bottom:-5px; border-top:1px solid var(--border); padding-top:10px;">⚙️ 活跃进程 (Top 5)</div>
+                <div class="process-table">
+                    <div class="pt-header">
+                        <span class="pt-col-mem">内存</span>
+                        <span class="pt-col-cpu">CPU</span>
+                        <span class="pt-col-cmd">命令</span>
+                    </div>
+                    <div id="processListBody">
+                        <div style="padding:15px; color:#555; text-align:center;">Waiting for data...</div>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
@@ -159,90 +159,73 @@
         editor.session.setMode("ace/mode/sh"); 
         editor.setValue("// 建立连接并在左侧【双击】文件，以在此处加载远端文件流...\n// 在左侧【单击】选中文件后，可使用上方栏进行重命名和删除操作！", -1);
         
-        editor.commands.addCommand({
-            name: 'saveFile',
-            bindKey: {win: "Ctrl-S", mac: "Command-S"},
-            exec: function(editor) { saveCurrentFile(); }
-        });
+        editor.commands.addCommand({ name: 'saveFile', bindKey: {win: "Ctrl-S", mac: "Command-S"}, exec: function(editor) { saveCurrentFile(); } });
 
         window.saveCurrentFile = function() {
             const filename = document.getElementById('currentFileName').innerText;
             if(!activeId || !sessions[activeId] || !sessions[activeId].ws || filename === 'None') return;
-            
-            const content = editor.getValue();
-            sessions[activeId].ws.send(JSON.stringify({ type: 'WRITE_FILE', filename: filename, content: content }));
+            sessions[activeId].ws.send(JSON.stringify({ type: 'WRITE_FILE', filename: filename, content: editor.getValue() }));
             
             const saveBtn = document.getElementById('saveIndicator');
-            saveBtn.innerText = '⏳ Saving...';
-            saveBtn.style.color = '#ffeb3b';
-            setTimeout(() => { 
-                saveBtn.innerText = '✔ Saved'; 
-                saveBtn.style.color = '#00ff66'; 
-                setTimeout(() => { saveBtn.innerText = 'Save (Ctrl+S)'; saveBtn.style.color = '#fff'; }, 2000);
-            }, 500);
+            saveBtn.innerText = '⏳ Saving...'; saveBtn.style.color = '#ffeb3b';
+            setTimeout(() => { saveBtn.innerText = '✔ Saved'; saveBtn.style.color = '#00ff66'; setTimeout(() => { saveBtn.innerText = 'Save (Ctrl+S)'; saveBtn.style.color = '#fff'; }, 2000); }, 500);
         };
 
         window.createNode = function(type) {
-            if(!activeId || !sessions[activeId] || !sessions[activeId].ws) return alert('请先连接并选择一个活跃节点');
+            if(!activeId || !sessions[activeId] || !sessions[activeId].ws) return;
             const name = prompt(`请输入新${type === 'file' ? '文件' : '文件夹'}名称：`);
-            if(!name || name.trim() === '') return;
-            if(type === 'file') sessions[activeId].ws.send(JSON.stringify({ type: 'CREATE_FILE', filename: name.trim() }));
-            else sessions[activeId].ws.send(JSON.stringify({ type: 'CREATE_DIR', dirname: name.trim() }));
+            if(name && name.trim()) sessions[activeId].ws.send(JSON.stringify({ type: type==='file'?'CREATE_FILE':'CREATE_DIR', [type==='file'?'filename':'dirname']: name.trim() }));
         };
 
         window.renameNode = function() {
             if(!activeId || !sessions[activeId] || !sessions[activeId].ws) return;
             const node = sessions[activeId].selectedNode;
-            if(!node) return alert('请先在下方列表中【单击】选中一个需要重命名的文件或文件夹。');
-            
-            const newName = prompt(`将 "${node.name}" 重命名为：`, node.name);
-            if(!newName || newName.trim() === '' || newName === node.name) return;
-            
-            sessions[activeId].ws.send(JSON.stringify({ type: 'RENAME_NODE', oldName: node.name, newName: newName.trim() }));
+            if(!node) return alert('请先在下方列表中【单击】选中一个文件。');
+            const newName = prompt(`重命名为：`, node.name);
+            if(newName && newName.trim() !== node.name) sessions[activeId].ws.send(JSON.stringify({ type: 'RENAME_NODE', oldName: node.name, newName: newName.trim() }));
         };
 
         window.deleteNode = function() {
             if(!activeId || !sessions[activeId] || !sessions[activeId].ws) return;
             const node = sessions[activeId].selectedNode;
-            if(!node) return alert('请先在下方列表中【单击】选中一个需要删除的文件或文件夹。');
-            
-            if(confirm(`⚠️ 危险操作警报！\n确定要永久删除 ${node.isDir ? '文件夹' : '文件'} [ ${node.name} ] 吗？\n(注: SFTP协议仅支持删除空文件夹)`)) {
+            if(!node) return alert('请先在下方列表中【单击】选中一个文件。');
+            if(confirm(`⚠️ 确定要删除 [ ${node.name} ] 吗？`)) {
                 sessions[activeId].ws.send(JSON.stringify({ type: 'DELETE_NODE', filename: node.name, isDir: node.isDir }));
-                
-                if (!node.isDir && document.getElementById('currentFileName').innerText === node.name) {
-                    document.getElementById('currentFileName').innerText = 'None';
-                    editor.setValue('// ⚠️ 目标文件已被删除...', -1);
-                }
+                if (!node.isDir && document.getElementById('currentFileName').innerText === node.name) { document.getElementById('currentFileName').innerText = 'None'; editor.setValue('// 文件已删除...', -1); }
             }
         };
 
         window.refreshDir = function() {
             if(!activeId || !sessions[activeId] || !sessions[activeId].ws) return;
             sessions[activeId].ws.send(JSON.stringify({ type: 'REFRESH_DIR' }));
-            const fileHost = document.getElementById('currentFileHost');
-            const originalText = fileHost.innerText;
-            fileHost.innerText = 'Refreshed!';
-            fileHost.style.color = '#00ff66';
-            setTimeout(() => { fileHost.innerText = originalText; fileHost.style.color = ''; }, 800);
         };
-
 
         const gaugeChart = echarts.init(document.getElementById('gaugeChart'), 'dark');
         const netChart = echarts.init(document.getElementById('netChart'), 'dark');
         
         function resetCharts() {
-            gaugeChart.setOption({
-                backgroundColor: 'transparent',
-                series: [
-                    { type: 'gauge', center: ['25%', '45%'], radius: '65%', progress: { show: true, width: 6 }, axisLine: { lineStyle: { width: 6 } }, axisTick: { show: false }, splitLine: { show: false }, axisLabel: { show: false }, pointer: { show: false }, detail: { valueAnimation: true, fontSize: 16, color: '#fff', formatter: '{value}%', offsetCenter: [0, '15%'] }, data: [{ value: 0, name: 'CPU' }], title: { fontSize: 12, offsetCenter: [0, '90%'], color: '#888' } },
-                    { type: 'gauge', center: ['75%', '45%'], radius: '65%', progress: { show: true, width: 6, itemStyle: { color: '#007acc' } }, axisLine: { lineStyle: { width: 6 } }, axisTick: { show: false }, splitLine: { show: false }, axisLabel: { show: false }, pointer: { show: false }, detail: { valueAnimation: true, fontSize: 16, color: '#fff', formatter: '{value}%', offsetCenter: [0, '15%'] }, data: [{ value: 0, name: 'RAM' }], title: { fontSize: 12, offsetCenter: [0, '90%'], color: '#888' } }
-                ]
-            });
-            netChart.setOption({
-                grid: { left: 30, right: 10, bottom: 20, top: 40 }, xAxis: { type: 'category', boundaryGap: false, data: Array(20).fill(''), show: false }, yAxis: { type: 'value', splitLine: { lineStyle: { color: '#2c3c31' } } }, series: [{ type: 'line', data: Array(20).fill(0), areaStyle: { color: 'rgba(0, 255, 102, 0.2)' }, itemStyle: { color: '#00ff66' }, smooth: true }]
-            });
+            gaugeChart.setOption({ backgroundColor: 'transparent', series: [
+                { type: 'gauge', center: ['25%', '45%'], radius: '65%', progress: { show: true, width: 6 }, axisLine: { lineStyle: { width: 6 } }, axisTick: { show: false }, splitLine: { show: false }, axisLabel: { show: false }, pointer: { show: false }, detail: { valueAnimation: true, fontSize: 16, color: '#fff', formatter: '{value}%', offsetCenter: [0, '15%'] }, data: [{ value: 0, name: 'CPU' }], title: { fontSize: 12, offsetCenter: [0, '90%'], color: '#888' } },
+                { type: 'gauge', center: ['75%', '45%'], radius: '65%', progress: { show: true, width: 6, itemStyle: { color: '#007acc' } }, axisLine: { lineStyle: { width: 6 } }, axisTick: { show: false }, splitLine: { show: false }, axisLabel: { show: false }, pointer: { show: false }, detail: { valueAnimation: true, fontSize: 16, color: '#fff', formatter: '{value}%', offsetCenter: [0, '15%'] }, data: [{ value: 0, name: 'RAM' }], title: { fontSize: 12, offsetCenter: [0, '90%'], color: '#888' } }
+            ]});
+            netChart.setOption({ grid: { left: 30, right: 10, bottom: 20, top: 40 }, xAxis: { type: 'category', boundaryGap: false, data: Array(20).fill(''), show: false }, yAxis: { type: 'value', splitLine: { lineStyle: { color: '#2c3c31' } } }, series: [{ type: 'line', data: Array(20).fill(0), areaStyle: { color: 'rgba(0, 255, 102, 0.2)' }, itemStyle: { color: '#00ff66' }, smooth: true }] });
         }
         resetCharts();
+
+        // 渲染进程表格函数
+        function renderProcesses(processes) {
+            const container = document.getElementById('processListBody');
+            if(!processes || processes.length === 0) {
+                container.innerHTML = '<div style="padding:15px;color:#555;text-align:center;">暂无数据</div>'; return;
+            }
+            container.innerHTML = processes.map(p => `
+                <div class="pt-row">
+                    <span class="pt-col-mem">${p.mem}</span>
+                    <span class="pt-col-cpu">${p.cpu}</span>
+                    <span class="pt-col-cmd">${p.cmd}</span>
+                </div>
+            `).join('');
+        }
 
         function showLoginBox() { document.getElementById('loginOverlay').style.display = 'flex'; setTimeout(() => document.getElementById('loginOverlay').style.opacity = '1', 10); document.getElementById('closeLoginBtn').style.display = Object.keys(sessions).length > 0 ? 'block' : 'none'; }
         function hideLoginBox() { document.getElementById('loginOverlay').style.opacity = '0'; setTimeout(() => document.getElementById('loginOverlay').style.display = 'none', 300); }
@@ -251,100 +234,67 @@
             const host = document.getElementById('host').value.trim();
             const port = parseInt(document.getElementById('port').value) || 22;
             const user = document.getElementById('user').value.trim();
-            if(!host) return alert('请输入 IP 地址');
+            if(!host) return;
 
             const id = `${user}@${host}:${port}`;
-            if(sessions[id]) return alert('该节点已存在连接！');
+            if(sessions[id]) return alert('已存在连接！');
             hideLoginBox();
 
             const termDiv = document.createElement('div');
-            termDiv.className = 'terminal-wrapper';
-            termDiv.id = `term_${id.replace(/\W/g, '_')}`;
+            termDiv.className = 'terminal-wrapper'; termDiv.id = `term_${id.replace(/\W/g, '_')}`;
             document.getElementById('terminalsContainer').appendChild(termDiv);
 
             const term = new Terminal({ cursorBlink: true, theme: { background: '#000', foreground: '#a0c2a8' }, fontFamily: 'Consolas' });
-            const fitAddon = new FitAddon.FitAddon();
-            term.loadAddon(fitAddon);
-            term.open(termDiv);
+            const fitAddon = new FitAddon.FitAddon(); term.loadAddon(fitAddon); term.open(termDiv);
 
-            // 【核心】：新增 cmdOut 字段保存每个节点独立的原生回显
-            sessions[id] = { 
-                id, host, ws: null, term, fitAddon, termDiv, 
-                filesHTML: '<div style="color:#666;text-align:center;">拉取目录中...</div>', 
-                netData: Array(20).fill(0),
-                selectedNode: null,
-                cmdOut: 'Waiting for probe data...' 
-            };
+            // 增加 processes 数组状态保存
+            sessions[id] = { id, host, ws: null, term, fitAddon, termDiv, filesHTML: '<div style="color:#666;text-align:center;">拉取目录中...</div>', netData: Array(20).fill(0), selectedNode: null, processes: [] };
             term.writeln('\x1b[33m[Engine]\x1b[0m 向集群分配节点中...');
 
-            const protocol = window.location.protocol === 'https:' ? 'wss://' : 'ws://';
-            const ws = new WebSocket(protocol + window.location.host + '/');
+            const ws = new WebSocket((window.location.protocol === 'https:' ? 'wss://' : 'ws://') + window.location.host + '/');
             sessions[id].ws = ws;
 
             term.onData(data => { if(ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'TERMINAL_INPUT', data })); });
 
             ws.onopen = () => {
                 const creds = { host, port, username: user };
-                const pass = document.getElementById('pass').value;
-                const key = document.getElementById('key').value.trim();
+                const pass = document.getElementById('pass').value; const key = document.getElementById('key').value.trim();
                 if (key) { creds.privateKey = key; if (pass) creds.passphrase = pass; } else { creds.password = pass; }
                 ws.send(JSON.stringify(creds));
             };
 
             ws.onmessage = (e) => {
                 const packet = JSON.parse(e.data);
-                if (packet.type === 'TERMINAL') {
-                    term.write(packet.data);
-                } 
-                else if (packet.type === 'SYSTEM_MSG') {
-                    term.write(packet.data);
-                }
+                if (packet.type === 'TERMINAL' || packet.type === 'SYSTEM_MSG') term.write(packet.data);
                 else if (packet.type === 'SFTP_TREE') {
-                    sessions[id].filesHTML = packet.files.map(f => {
-                        const icon = f.isDir ? '<span class="icon-dir">📁</span>' : '<span class="icon-file">📄</span>';
-                        const dblclick = f.isDir ? '' : `ondblclick="openFile('${f.name}')"`;
-                        return `<div class="file-item" onclick="selectFileDom(this, '${f.name}', ${f.isDir})" ${dblclick}>${icon} ${f.name}</div>`;
-                    }).join('');
-                    
-                    if(sessions[id].selectedNode && !packet.files.some(f => f.name === sessions[id].selectedNode.name)) {
-                        sessions[id].selectedNode = null;
-                    }
+                    sessions[id].filesHTML = packet.files.map(f => `<div class="file-item" onclick="selectFileDom(this, '${f.name}', ${f.isDir})" ${f.isDir?'':`ondblclick="openFile('${f.name}')"`}>${f.isDir?'<span class="icon-dir">📁</span>':'<span class="icon-file">📄</span>'} ${f.name}</div>`).join('');
+                    if(sessions[id].selectedNode && !packet.files.some(f => f.name === sessions[id].selectedNode.name)) sessions[id].selectedNode = null;
                     if(activeId === id) updateActiveUI();
                 }
                 else if (packet.type === 'FILE_CONTENT') {
-                    if (activeId === id) {
-                        editor.setValue(packet.content, -1);
-                        const ext = packet.filename.split('.').pop().toLowerCase();
-                        const modeMap = { 'js':'javascript', 'json':'json', 'html':'html', 'css':'css', 'sh':'sh', 'bash':'sh', 'py':'python', 'yaml':'yaml', 'yml':'yaml', 'conf':'ini', 'xml':'xml' };
-                        editor.session.setMode(`ace/mode/${modeMap[ext] || 'text'}`);
-                    }
+                    if (activeId === id) { editor.setValue(packet.content, -1); editor.session.setMode(`ace/mode/${{'js':'javascript','json':'json','html':'html','css':'css','sh':'sh','bash':'sh','py':'python','yaml':'yaml','yml':'yaml','conf':'ini','xml':'xml'}[packet.filename.split('.').pop().toLowerCase()] || 'text'}`); }
                 }
                 else if (packet.type === 'MONITOR') {
                     sessions[id].netData.shift(); sessions[id].netData.push(packet.net);
-                    sessions[id].cmdOut = packet.cmdOut; // 存入状态机
+                    sessions[id].processes = packet.processes || []; // 保存进程数据
 
                     if(activeId === id) {
                         gaugeChart.setOption({ series: [{ data: [{ value: packet.cpu.toFixed(1), name: 'CPU' }] }, { data: [{ value: packet.mem.toFixed(1), name: 'RAM' }] }] });
                         netChart.setOption({ series: [{ data: sessions[id].netData }] });
-                        // 【渲染原生输出】
-                        if(packet.cmdOut) document.getElementById('rawCmdDisplay').innerText = packet.cmdOut;
+                        // 动态渲染表格
+                        renderProcesses(sessions[id].processes);
                     }
                 }
             };
 
             ws.onclose = () => term.writeln('\r\n\x1b[31m[System]\x1b[0m 节点连接断开。');
             ws.onerror = () => term.writeln('\r\n\x1b[31m[System]\x1b[0m WebSocket 隧道建立失败。');
-            
-            switchSession(id); 
-            renderServerList();
+            switchSession(id); renderServerList();
         }
 
         window.selectFileDom = function(el, name, isDir) {
-            document.querySelectorAll('.file-item').forEach(e => e.classList.remove('selected'));
-            el.classList.add('selected');
-            if (activeId && sessions[activeId]) {
-                sessions[activeId].selectedNode = { name, isDir }; 
-            }
+            document.querySelectorAll('.file-item').forEach(e => e.classList.remove('selected')); el.classList.add('selected');
+            if (activeId && sessions[activeId]) sessions[activeId].selectedNode = { name, isDir }; 
         };
 
         function switchSession(id) {
@@ -356,8 +306,8 @@
             document.getElementById('currentFileHost').innerText = sessions[id].host;
             document.getElementById('currentTermHost').innerText = sessions[id].id;
             
-            // 【核心】：切换节点时，同步切换并渲染该节点独立的原生命令状态！
-            document.getElementById('rawCmdDisplay').innerText = sessions[id].cmdOut || 'Waiting for probe data...';
+            // 切换节点时，渲染对应节点的进程表格
+            renderProcesses(sessions[id].processes);
             
             renderServerList(); updateActiveUI();
         }
@@ -365,26 +315,18 @@
         function closeSession(id, event) {
             event.stopPropagation();
             if(sessions[id].ws) sessions[id].ws.close();
-            sessions[id].term.dispose();
-            sessions[id].termDiv.remove();
-            delete sessions[id];
+            sessions[id].term.dispose(); sessions[id].termDiv.remove(); delete sessions[id];
             if(activeId === id) {
                 const remaining = Object.keys(sessions);
                 if(remaining.length > 0) switchSession(remaining[0]);
-                else { activeId = null; document.getElementById('currentFileHost').innerText = 'None'; document.getElementById('currentTermHost').innerText = 'bash'; document.getElementById('fileManager').innerHTML = '无连接的节点'; document.getElementById('rawCmdDisplay').innerText = 'System Offline.'; resetCharts(); showLoginBox(); }
+                else { activeId = null; document.getElementById('currentFileHost').innerText = 'None'; document.getElementById('currentTermHost').innerText = 'bash'; document.getElementById('fileManager').innerHTML = '无连接的节点'; renderProcesses([]); resetCharts(); showLoginBox(); }
             }
             renderServerList();
         }
 
         function renderServerList() {
-            const keys = Object.keys(sessions);
-            document.getElementById('nodeCount').innerText = keys.length;
-            document.getElementById('serverList').innerHTML = keys.map(id => `
-                <div class="server-item ${id === activeId ? 'active' : ''}" onclick="switchSession('${id}')">
-                    <span>🖥️ ${sessions[id].host}</span>
-                    <span class="close-btn" onclick="closeSession('${id}', event)">✖</span>
-                </div>
-            `).join('');
+            const keys = Object.keys(sessions); document.getElementById('nodeCount').innerText = keys.length;
+            document.getElementById('serverList').innerHTML = keys.map(id => `<div class="server-item ${id === activeId ? 'active' : ''}" onclick="switchSession('${id}')"><span>🖥️ ${sessions[id].host}</span><span class="close-btn" onclick="closeSession('${id}', event)">✖</span></div>`).join('');
         }
 
         function updateActiveUI() { 
@@ -392,24 +334,13 @@
                 document.getElementById('fileManager').innerHTML = sessions[activeId].filesHTML;
                 if(sessions[activeId].selectedNode) {
                     const items = document.querySelectorAll('.file-item');
-                    for(let i=0; i<items.length; i++) {
-                        if(items[i].innerText.includes(sessions[activeId].selectedNode.name)) {
-                            items[i].classList.add('selected');
-                            break;
-                        }
-                    }
+                    for(let i=0; i<items.length; i++) { if(items[i].innerText.includes(sessions[activeId].selectedNode.name)) { items[i].classList.add('selected'); break; } }
                 }
             }
         }
         
         window.addEventListener('resize', () => { if(activeId && sessions[activeId]) sessions[activeId].fitAddon.fit(); });
-
-        window.openFile = function(filename) {
-            if(!activeId || !sessions[activeId] || !sessions[activeId].ws) return;
-            document.getElementById('currentFileName').innerText = filename;
-            editor.setValue(`// 正在从节点拉取文件流: /root/${filename} \n// 🚀 Engine Requesting...`, -1);
-            sessions[activeId].ws.send(JSON.stringify({ type: 'READ_FILE', filename: filename }));
-        };
+        window.openFile = function(filename) { if(!activeId || !sessions[activeId] || !sessions[activeId].ws) return; document.getElementById('currentFileName').innerText = filename; editor.setValue(`// 正在从节点拉取文件流: /root/${filename} \n// 🚀 Engine Requesting...`, -1); sessions[activeId].ws.send(JSON.stringify({ type: 'READ_FILE', filename: filename })); };
     </script>
 </body>
 </html>
