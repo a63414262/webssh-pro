@@ -311,7 +311,6 @@
             renderFullProcessList();
         };
 
-        // 【核心修复】：单行字符串模板，绝对防止 Minify 报错
         function renderFullProcessList() {
             if (!activeId || !sessions[activeId] || !sessions[activeId].fullProcessList) return;
             let list = [...sessions[activeId].fullProcessList];
@@ -380,7 +379,6 @@
                     let html = '';
                     if (packet.path !== '/') html += `<div class="file-item" ondblclick="enterDir('..')"><div style="flex:1; text-align:left;"><span class="icon-dir">🔙</span> .. (上一级)</div></div>`;
                     
-                    // 【核心修复】：单行字符串模板，绝对防止 Minify 报错
                     html += packet.files.map(f => {
                         const isZip = f.name.endsWith('.zip') || f.name.endsWith('.tar.gz') || f.name.endsWith('.tgz');
                         const unzipBtn = (!f.isDir && isZip) ? `<span class="f-action" title="云端秒解压" onclick="unzipFile('${f.name}', event)">📦</span>` : '';
@@ -415,31 +413,47 @@
             };
             ws.onclose = () => term.writeln('\r\n\x1b[31m[System]\x1b[0m 节点连接断开。'); ws.onerror = () => term.writeln('\r\n\x1b[31m[System]\x1b[0m WebSocket 隧道建立失败。');
             
-            switchSession(id); renderServerList();
+            // 这里只需执行一次，内部会调用 renderServerList
+            switchSession(id); 
         }
 
         window.selectFileDom = function(el, name, isDir) { document.querySelectorAll('.file-item').forEach(e => e.classList.remove('selected')); el.classList.add('selected'); if (activeId && sessions[activeId]) sessions[activeId].selectedNode = { name, isDir }; };
+        
         function switchSession(id) {
             if(!sessions[id]) return; activeId = id; document.querySelectorAll('.terminal-wrapper').forEach(el => el.classList.remove('active')); sessions[id].termDiv.classList.add('active');
-            setTimeout(() => sessions[id].fitAddon.fit(), 50); document.getElementById('currentFileHost').innerText = sessions[id].host; document.getElementById('currentTermHost').innerText = sessions[id].id;
+            setTimeout(() => sessions[id].fitAddon.fit(), 50); 
+            
+            // 【核心修复】：移除了导致报错的 currentFileHost 代码
+            document.getElementById('currentTermHost').innerText = sessions[id].id;
+            
             gaugeChart.setOption({ series: [{ data: [{ value: (sessions[id].cpu || 0).toFixed(1), name: 'CPU' }] }, { data: [{ value: (sessions[id].mem || 0).toFixed(1), name: 'RAM' }] }, { data: [{ value: (sessions[id].swap || 0).toFixed(1), name: 'SWAP' }] }] });
             renderProcesses(sessions[id].processes); document.getElementById('sysUptime').innerText = formatUptime(sessions[id].uptime); document.getElementById('sysLoad').innerText = sessions[id].load || '--'; document.getElementById('sysRx').innerText = (sessions[id].rxSpeed !== undefined ? sessions[id].rxSpeed : '--') + ' KB/s'; document.getElementById('sysTx').innerText = (sessions[id].txSpeed !== undefined ? sessions[id].txSpeed : '--') + ' KB/s';
+            
             renderServerList(); updateActiveUI();
         }
+
         function closeSession(id, event) {
             event.stopPropagation(); if(sessions[id].ws) sessions[id].ws.close(); sessions[id].term.dispose(); sessions[id].termDiv.remove(); delete sessions[id];
-            if(activeId === id) { const remaining = Object.keys(sessions); if(remaining.length > 0) switchSession(remaining[0]); else { activeId = null; document.getElementById('currentFileHost').innerText = 'None'; document.getElementById('currentTermHost').innerText = 'bash'; document.getElementById('fileManager').innerHTML = '<div style="text-align: center; margin-top: 10px;">无连接的节点</div>'; document.getElementById('currentDirPath').innerText = '📁 /root'; document.getElementById('currentDirPath').title = '📁 /root'; renderProcesses([]); resetCharts(); document.getElementById('sysUptime').innerText = '--'; document.getElementById('sysLoad').innerText = '--'; document.getElementById('sysRx').innerText = '-- KB/s'; document.getElementById('sysTx').innerText = '-- KB/s'; showLoginBox(); } }
+            if(activeId === id) { 
+                const remaining = Object.keys(sessions); 
+                if(remaining.length > 0) switchSession(remaining[0]); 
+                else { 
+                    activeId = null; 
+                    // 【核心修复】：同步移除
+                    document.getElementById('currentTermHost').innerText = 'bash'; document.getElementById('fileManager').innerHTML = '<div style="text-align: center; margin-top: 10px;">无连接的节点</div>'; document.getElementById('currentDirPath').innerText = '📁 /root'; document.getElementById('currentDirPath').title = '📁 /root'; renderProcesses([]); resetCharts(); document.getElementById('sysUptime').innerText = '--'; document.getElementById('sysLoad').innerText = '--'; document.getElementById('sysRx').innerText = '-- KB/s'; document.getElementById('sysTx').innerText = '-- KB/s'; showLoginBox(); 
+                } 
+            }
             renderServerList();
         }
-        
-        // 【核心修复】：单行字符串模板，绝对防止 Minify 报错
+
         function renderServerList() { 
             const keys = Object.keys(sessions); 
             document.getElementById('nodeCount').innerText = keys.length; 
             document.getElementById('serverList').innerHTML = keys.map(id => `<div class="server-item ${id === activeId ? 'active' : ''}" onclick="switchSession('${id}')"><span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; padding-right: 10px;" title="${sessions[id].host}">🖥️ ${sessions[id].host}</span><span class="close-btn" onclick="closeSession('${id}', event)">✖</span></div>`).join(''); 
         }
-        
+
         function updateActiveUI() { if(activeId && sessions[activeId]) { document.getElementById('fileManager').innerHTML = sessions[activeId].filesHTML; document.getElementById('currentDirPath').innerText = '📁 ' + sessions[activeId].currentDir; document.getElementById('currentDirPath').title = '📁 ' + sessions[activeId].currentDir; if(sessions[activeId].selectedNode) { const items = document.querySelectorAll('.file-item'); for(let i=0; i<items.length; i++) { if(items[i].innerText.includes(sessions[activeId].selectedNode.name)) { items[i].classList.add('selected'); break; } } } } }
+        
         window.addEventListener('resize', () => { if(activeId && sessions[activeId]) sessions[activeId].fitAddon.fit(); });
         window.openFile = function(filename) { if(!activeId || !sessions[activeId] || !sessions[activeId].ws) return; const targetPath = joinPath(sessions[activeId].currentDir, filename); document.getElementById('currentFileName').innerText = filename; editor.setValue(`// 正在从节点拉取文件流: ${targetPath} \n// 🚀 Engine Requesting...`, -1); sessions[activeId].ws.send(JSON.stringify({ type: 'READ_FILE', path: targetPath })); };
     </script>
