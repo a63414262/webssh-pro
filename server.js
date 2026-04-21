@@ -16,9 +16,14 @@ const wss = new WebSocket.Server({ server });
 const PANEL_USER = process.env.PANEL_USER || '';
 const PANEL_PASS = process.env.PANEL_PASS || '';
 const NODES_FILE = '/usr/src/app/nodes.json'; 
+const COMMANDS_FILE = '/usr/src/app/commands.json'; // 【新增】：常用命令存储文件
 
 const getSavedNodes = () => { try { if (fs.existsSync(NODES_FILE)) return JSON.parse(fs.readFileSync(NODES_FILE, 'utf8')); } catch(e){} return []; };
 const saveNodesData = (nodes) => { fs.writeFileSync(NODES_FILE, JSON.stringify(nodes, null, 2), 'utf8'); };
+
+// 【新增】：命令保险箱操作函数
+const getSavedCommands = () => { try { if (fs.existsSync(COMMANDS_FILE)) return JSON.parse(fs.readFileSync(COMMANDS_FILE, 'utf8')); } catch(e){} return []; };
+const saveCommandsData = (cmds) => { fs.writeFileSync(COMMANDS_FILE, JSON.stringify(cmds, null, 2), 'utf8'); };
 
 const setupAutoWarp = () => {
     const confPath = '/usr/src/app/warp.conf';
@@ -49,7 +54,7 @@ wss.on('connection', (ws, req) => {
         } else { ipBlocklist.delete(clientIp); ipAttempts.delete(clientIp); }
     }
 
-    ws.isAuthenticated = (!PANEL_USER && !PANEL_PASS); // 无密码时默认所有人都是管理员
+    ws.isAuthenticated = (!PANEL_USER && !PANEL_PASS);
 
     let sshClient = new Client();
     let sshStream = null;
@@ -69,14 +74,13 @@ wss.on('connection', (ws, req) => {
         try {
             const cmd = JSON.parse(message);
 
-            // ================= 【核心控制流：保险箱鉴权与存取】 =================
+            // ================= 【面板鉴权】 =================
             if (cmd.type === 'PANEL_LOGIN') {
                 if (cmd.user === PANEL_USER && cmd.pass === PANEL_PASS) {
-                    ws.isAuthenticated = true;
-                    ipAttempts.delete(clientIp); // 登录成功，清空犯罪记录
-                    ws.send(JSON.stringify({ type: 'LOGIN_SUCCESS', nodes: getSavedNodes() }));
+                    ws.isAuthenticated = true; ipAttempts.delete(clientIp); 
+                    // 登录成功时，同时下发保存的节点和命令
+                    ws.send(JSON.stringify({ type: 'LOGIN_SUCCESS', nodes: getSavedNodes(), commands: getSavedCommands() }));
                 } else {
-                    // 如果前端是空请求探测(探测是否需要密码)，不计入封禁惩罚
                     if (cmd.user !== '' || cmd.pass !== '') {
                         let attempts = (ipAttempts.get(clientIp) || 0) + 1; ipAttempts.set(clientIp, attempts);
                         if (attempts >= MAX_ATTEMPTS) { ipBlocklist.set(clientIp, Date.now() + BLOCK_TIME); }
@@ -86,40 +90,47 @@ wss.on('connection', (ws, req) => {
                 return;
             }
 
-            // 【隔离护城河】：只有认证用户才能触碰云端保险箱，否则直接驳回
-            if (cmd.type === 'GET_NODES' || cmd.type === 'SAVE_NODE' || cmd.type === 'DELETE_SAVED_NODE') {
+            // ================= 【云端保险箱 (节点 & 命令)】 =================
+            if (cmd.type === 'GET_NODES' || cmd.type === 'SAVE_NODE' || cmd.type === 'DELETE_SAVED_NODE' || cmd.type === 'GET_COMMANDS' || cmd.type === 'SAVE_COMMAND' || cmd.type === 'DELETE_COMMAND') {
                 if (!ws.isAuthenticated) return;
                 
-                if (cmd.type === 'GET_NODES') {
-                    ws.send(JSON.stringify({ type: 'SAVED_NODES_LIST', nodes: getSavedNodes() }));
-                }
+                // 节点相关
+                if (cmd.type === 'GET_NODES') ws.send(JSON.stringify({ type: 'SAVED_NODES_LIST', nodes: getSavedNodes() }));
                 else if (cmd.type === 'SAVE_NODE') {
-                    const nodes = getSavedNodes();
-                    const existingIndex = nodes.findIndex(n => n.host === cmd.node.host && n.port === cmd.node.port && n.user === cmd.node.user);
-                    if (existingIndex >= 0) nodes[existingIndex] = cmd.node; else nodes.push(cmd.node);
+                    const nodes = getSavedNodes(); const idx = nodes.findIndex(n => n.host === cmd.node.host && n.port === cmd.node.port && n.user === cmd.node.user);
+                    if (idx >= 0) nodes[idx] = cmd.node; else nodes.push(cmd.node);
                     saveNodesData(nodes); ws.send(JSON.stringify({ type: 'SAVED_NODES_LIST', nodes: getSavedNodes() }));
                 }
                 else if (cmd.type === 'DELETE_SAVED_NODE') {
                     let nodes = getSavedNodes(); nodes = nodes.filter(n => n.id !== cmd.id);
                     saveNodesData(nodes); ws.send(JSON.stringify({ type: 'SAVED_NODES_LIST', nodes: getSavedNodes() }));
                 }
+                
+                // 【新增】：常用命令相关操作
+                else if (cmd.type === 'GET_COMMANDS') ws.send(JSON.stringify({ type: 'SAVED_COMMANDS_LIST', commands: getSavedCommands() }));
+                else if (cmd.type === 'SAVE_COMMAND') {
+                    const cmds = getSavedCommands(); const idx = cmds.findIndex(c => c.id === cmd.command.id);
+                    if (idx >= 0) cmds[idx] = cmd.command; else cmds.push(cmd.command);
+                    saveCommandsData(cmds); ws.send(JSON.stringify({ type: 'SAVED_COMMANDS_LIST', commands: getSavedCommands() }));
+                }
+                else if (cmd.type === 'DELETE_COMMAND') {
+                    let cmds = getSavedCommands(); cmds = cmds.filter(c => c.id !== cmd.id);
+                    saveCommandsData(cmds); ws.send(JSON.stringify({ type: 'SAVED_COMMANDS_LIST', commands: getSavedCommands() }));
+                }
                 return;
             }
 
-            // ================= 【常规无痕模式 SSH 引擎 (无需鉴权即可使用)】 =================
+            // ================= 【SSH 连接引擎】 =================
             if (cmd.host) {
                 if (sshStream) return;
                 const creds = cmd; creds.tryKeyboard = true; creds.readyTimeout = 20000;
 
                 sshClient.on('ready', () => {
                     sshClient.shell({ term: 'xterm-256color' }, (err, stream) => {
-                        if (err) return ws.close();
-                        sshStream = stream;
+                        if (err) return ws.close(); sshStream = stream;
                         ws.send(JSON.stringify({ type: 'TERMINAL', data: '\r\n\x1b[32m[System]\x1b[0m 🚀 OS 核心启动，终端连接成功。您可以直接将文件拖拽至此窗口进行秒传。\r\n\r\n' }));
-                        stream.on('data', (d) => ws.send(JSON.stringify({ type: 'TERMINAL', data: d.toString('utf8') })));
-                        stream.on('close', () => ws.close());
+                        stream.on('data', (d) => ws.send(JSON.stringify({ type: 'TERMINAL', data: d.toString('utf8') }))); stream.on('close', () => ws.close());
                     });
-
                     sshClient.sftp((err, sftp) => { if (!err) { sftpSession = sftp; sendDirTree(sftpSession, '/root'); } });
                     sshClient.lastRx = undefined; sshClient.lastTx = undefined;
 
@@ -133,15 +144,11 @@ wss.on('connection', (ws, req) => {
                                     const cpu = parseFloat(p[0]) || 0; const mem = parseFloat(p[1]) || 0; const swap = parseFloat(p[2]) || 0;
                                     const netParts = p[3].split(/\s+/); const currentRx = parseFloat(netParts[0]) || 0; const currentTx = parseFloat(netParts[1]) || 0;
                                     const uptime = parseFloat(p[4]) || 0; const load = p[5] || '0.00 0.00 0.00';
-                                    let rxSpeed = 0, txSpeed = 0;
-                                    if (sshClient.lastRx !== undefined && currentRx >= sshClient.lastRx) { rxSpeed = (currentRx - sshClient.lastRx) / 1024 / 2; txSpeed = (currentTx - sshClient.lastTx) / 1024 / 2; }
+                                    let rxSpeed = 0, txSpeed = 0; if (sshClient.lastRx !== undefined && currentRx >= sshClient.lastRx) { rxSpeed = (currentRx - sshClient.lastRx) / 1024 / 2; txSpeed = (currentTx - sshClient.lastTx) / 1024 / 2; }
                                     sshClient.lastRx = currentRx; sshClient.lastTx = currentTx;
                                     const processes = p.slice(6).map(line => {
                                         const parts = line.trim().split(/\s+/);
-                                        if(parts.length >= 3) {
-                                            let rss = parseInt(parts[0]); let memStr = rss > 1024 ? (rss/1024).toFixed(1) + 'M' : rss + 'K'; if (rss === 0) memStr = '0';
-                                            return { mem: memStr, cpu: parts[1], cmd: parts.slice(2).join(' ') };
-                                        } return null;
+                                        if(parts.length >= 3) { let rss = parseInt(parts[0]); let memStr = rss > 1024 ? (rss/1024).toFixed(1) + 'M' : rss + 'K'; if (rss === 0) memStr = '0'; return { mem: memStr, cpu: parts[1], cmd: parts.slice(2).join(' ') }; } return null;
                                     }).filter(Boolean);
                                     ws.send(JSON.stringify({ type: 'MONITOR', cpu, mem, swap, rxSpeed: parseFloat(rxSpeed.toFixed(1)), txSpeed: parseFloat(txSpeed.toFixed(1)), uptime, load, processes }));
                                 }
@@ -152,7 +159,11 @@ wss.on('connection', (ws, req) => {
                     if (prompts.length > 0 && prompts[0].prompt.toLowerCase().includes('password')) finish([creds.password]); else finish([]);
                 }).on('error', (err) => {
                     if (ws.readyState === WebSocket.OPEN) {
-                        ws.send(JSON.stringify({ type: 'TERMINAL', data: `\r\n\x1b[31m[SSH 失败]:\x1b[0m ${err.message}\r\n` }));
+                        if (err.message.toLowerCase().includes('authenticat') || err.message.includes('Handshake failed')) {
+                            let attempts = (ipAttempts.get(clientIp) || 0) + 1; ipAttempts.set(clientIp, attempts);
+                            if (attempts >= MAX_ATTEMPTS) { ipBlocklist.set(clientIp, Date.now() + BLOCK_TIME); ws.send(JSON.stringify({ type: 'TERMINAL', data: `\r\n\x1b[1;41;37m [ 警报 ] \x1b[0m\x1b[31m IP 已被封禁！\x1b[0m\r\n` })); } 
+                            else ws.send(JSON.stringify({ type: 'TERMINAL', data: `\r\n\x1b[31m[SSH 鉴权失败]:\x1b[0m 密码或私钥错误！\r\n` }));
+                        } else ws.send(JSON.stringify({ type: 'TERMINAL', data: `\r\n\x1b[31m[SSH Error]:\x1b[0m ${err.message}\r\n` }));
                         ws.close();
                     }
                 });
@@ -169,8 +180,7 @@ wss.on('connection', (ws, req) => {
             if (cmd.type === 'TERMINAL_INPUT' && sshStream) sshStream.write(cmd.data);
             else if (cmd.type === 'UNZIP' && sshClient) {
                 const ext = cmd.path.toLowerCase(); let execCmd = '';
-                if (ext.endsWith('.zip')) execCmd = `unzip -o "${cmd.path}" -d "${cmd.dir}"`;
-                else if (ext.endsWith('.tar.gz') || ext.endsWith('.tgz')) execCmd = `tar -xzf "${cmd.path}" -C "${cmd.dir}"`;
+                if (ext.endsWith('.zip')) execCmd = `unzip -o "${cmd.path}" -d "${cmd.dir}"`; else if (ext.endsWith('.tar.gz') || ext.endsWith('.tgz')) execCmd = `tar -xzf "${cmd.path}" -C "${cmd.dir}"`;
                 if (execCmd) { sshClient.exec(execCmd, (err, stream) => { if (err) return ws.send(JSON.stringify({ type: 'SYSTEM_MSG', data: `\r\n\x1b[31m[System] 解压失败: ${err.message}\x1b[0m\r\n` })); stream.on('close', () => { ws.send(JSON.stringify({ type: 'SYSTEM_MSG', data: `\r\n\x1b[32m[System] 📦 文件解压完成！\x1b[0m\r\n` })); sendDirTree(sftpSession, cmd.dir); }); }); }
             }
             else if (cmd.type === 'DOWNLOAD_FILE' && sftpSession) { sftpSession.readFile(cmd.path, (err, data) => { if (!err) ws.send(JSON.stringify({ type: 'DOWNLOAD_READY', filename: cmd.path.split('/').pop(), data: data.toString('base64') })); }); }
@@ -194,4 +204,4 @@ wss.on('connection', (ws, req) => {
 });
 
 const PORT = process.env.PORT || 8080;
-server.listen(PORT, '0.0.0.0', () => console.log(`[Running] WebOS 终极访客护城河版已点火，端口: ${PORT}`));
+server.listen(PORT, '0.0.0.0', () => console.log(`[Running] WebOS 终极密码箱版已点火，端口: ${PORT}`));
