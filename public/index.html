@@ -29,7 +29,8 @@
         .add-btn { cursor: pointer; color: var(--accent); background: rgba(0,255,102,0.1); padding: 2px 8px; border-radius: 4px; border: 1px solid var(--accent); transition: 0.2s;}
         .add-btn:hover { background: var(--accent); color: #000; }
 
-        #serverList { max-height: 25%; overflow-y: auto; border-bottom: 2px solid var(--border); background: #111813;}
+        #savedNodeList { max-height: 25%; overflow-y: auto; border-bottom: 2px solid var(--border); background: #0a120c;}
+        #serverList { flex: 1; overflow-y: auto; border-bottom: 2px solid var(--border); background: #111813;}
         .server-item { padding: 8px 15px; font-size: 12px; cursor: pointer; display: flex; justify-content: space-between; align-items: center; border-left: 3px solid transparent; transition: 0.2s;}
         .server-item:hover { background: rgba(255,255,255,0.05); }
         .server-item.active { background: rgba(0, 255, 102, 0.1); border-left-color: var(--accent); color: #fff; }
@@ -93,29 +94,45 @@
         @keyframes pulse-green { 0% { opacity: 0.3; } 50% { opacity: 1; text-shadow: 0 0 8px var(--accent); } 100% { opacity: 0.3; } }
         .live-indicator { font-size: 12px; font-weight: normal; color: var(--accent); margin-left: 15px; animation: pulse-green 2s infinite; }
 
-        #loginOverlay { position: absolute; inset: 0; background: rgba(0,0,0,0.85); backdrop-filter: blur(5px); display: flex; justify-content: center; align-items: center; z-index: 999; transition: opacity 0.3s; }
+        .overlay-bg { position: absolute; inset: 0; background: rgba(0,0,0,0.85); backdrop-filter: blur(5px); display: none; justify-content: center; align-items: center; z-index: 999; opacity: 0; transition: opacity 0.3s; }
         .login-box { background: #161e18; border: 1px solid var(--accent); padding: 30px; width: 400px; border-radius: 8px; box-shadow: 0 0 30px rgba(0,255,102,0.1); display: grid; gap: 15px; }
         input, textarea { background: #0a120c; color: #fff; border: 1px solid #3c4c41; padding: 10px; border-radius: 4px; font-family: monospace; outline: none;}
         input:focus, textarea:focus { border-color: var(--accent); }
         textarea { height: 80px; resize: vertical; }
         button { background: var(--accent); color: #000; border: none; padding: 12px; cursor: pointer; font-weight: bold; border-radius: 4px; transition: 0.2s;}
         button:hover { background: #00cc52; box-shadow: 0 0 15px rgba(0,255,102,0.4);}
+        
+        .auth-btn { cursor: pointer; border: 1px solid var(--border); padding: 4px 10px; border-radius: 4px; transition: 0.3s; font-size: 12px; background: #141c16; }
+        .auth-btn:hover { border-color: var(--accent); color: var(--accent); }
     </style>
 </head>
 <body>
-    <div id="loginOverlay">
+    <div id="panelAuthOverlay" class="overlay-bg">
+        <div class="login-box">
+            <h2 style="margin:0 0 10px 0; color:#fff; text-align: center;">🔐 面板安全认证</h2>
+            <div style="font-size: 12px; color: #888; text-align: center; margin-top: -10px;">输入 ClawCloud 环境变量中配置的凭证</div>
+            <input type="text" id="panelUser" placeholder="面板用户名 (PANEL_USER)">
+            <input type="password" id="panelPass" placeholder="面板密码 (PANEL_PASS)">
+            <button onclick="doPanelLogin()">🚀 登录控制台</button>
+        </div>
+    </div>
+
+    <div id="sshConnectOverlay" class="overlay-bg">
         <div class="login-box">
             <h2 style="margin:0 0 10px 0; color:#fff; display:flex; justify-content:space-between;">
-                <span>系统直连凭证</span>
-                <span style="cursor:pointer; color:#888; font-size:16px;" onclick="hideLoginBox()" id="closeLoginBtn" style="display:none;">✖</span>
+                <span>⚡ 添加节点直连</span>
+                <span style="cursor:pointer; color:#888; font-size:16px;" onclick="hideOverlay('sshConnectOverlay')">✖</span>
             </h2>
             <div style="display: flex; gap: 10px;">
-                <input type="text" id="host" placeholder="Server IP / IPv6" value="" style="flex: 1;">
+                <input type="text" id="host" placeholder="Server IP / IPv6" style="flex: 1;">
                 <input type="number" id="port" placeholder="Port" value="22" style="width: 80px;">
             </div>
             <input type="text" id="user" placeholder="Username" value="root">
             <input type="password" id="pass" placeholder="Password (或私钥密码)">
             <textarea id="key" placeholder="在此粘贴私钥 (-----BEGIN OPENSSH PRIVATE KEY-----)&#10;留空则使用上方密码登录"></textarea>
+            <label style="color:#a0c2a8; font-size:13px; display:flex; align-items:center; cursor:pointer;">
+                <input type="checkbox" id="saveNodeCheck" checked style="width: auto; margin-right: 8px; cursor:pointer;"> 💾 将此凭证安全存储至云端节点保险箱
+            </label>
             <button onclick="connectEngine()">⚡ 建立节点连接</button>
         </div>
     </div>
@@ -151,12 +168,21 @@
             <a href="https://www.youtube.com/@%E5%B0%8FK%E5%88%86%E4%BA%AB" target="_blank" title="访问作者 YouTube 频道">📺 Youtube频道</a>
             <a href="https://github.com/a63414262/webssh-pro" target="_blank" title="访问开源项目主页">⭐ GitHub 项目</a>
         </div>
-        <div style="font-size: 12px; color: #888;">Active Nodes: <span id="nodeCount" style="color:var(--accent)">0</span></div>
+        
+        <div style="display:flex; align-items:center; gap: 15px;">
+            <div id="authStatusBtn" class="auth-btn" onclick="showOverlay('panelAuthOverlay')">🔐 登录面板</div>
+            <div style="font-size: 12px; color: #888;">Active Nodes: <span id="nodeCount" style="color:var(--accent)">0</span></div>
+        </div>
     </div>
     
     <div class="desktop">
         <div class="panel">
-            <div class="panel-title"><span>🌐 节点集群</span> <span class="add-btn" onclick="showLoginBox()">+ Add</span></div>
+            <div class="panel-title" style="color: #dcb67a;"><span>📍 已存节点 (云端保险箱)</span></div>
+            <div id="savedNodeList">
+                <div style="padding: 10px; text-align: center; color: #666; font-size: 12px;">未登录或无数据</div>
+            </div>
+
+            <div class="panel-title"><span>🌐 活跃节点会话</span> <span class="add-btn" onclick="showOverlay('sshConnectOverlay')">+ 直连</span></div>
             <div id="serverList"></div>
             
             <div class="panel-title" style="border-top: 1px solid var(--border);">
@@ -169,7 +195,6 @@
                     <span title="刷新目录" onclick="refreshDir()">🔄</span>
                 </span>
             </div>
-            
             <div id="fileManager" style="color:#666; padding-top:10px;"><div style="text-align: center; margin-top: 10px;">未选择活跃节点</div></div>
         </div>
 
@@ -222,6 +247,8 @@
         let currentSortCol = 'cpu';
         let currentSortDir = 'desc';
         let processPollingInterval = null;
+        let globalWs = null; // 全局 WebSocket 鉴权通道
+        let savedNodesCache = []; // 本地缓存的已存节点
 
         function joinPath(dir, file) { return dir.endsWith('/') ? dir + file : dir + '/' + file; }
         function getParentDir(dir) { if(dir === '/') return '/'; const parts = dir.split('/').filter(Boolean); parts.pop(); return '/' + parts.join('/'); }
@@ -271,26 +298,9 @@
             }
         };
         window.refreshDir = function() { if(activeId && sessions[activeId]) sessions[activeId].ws.send(JSON.stringify({ type: 'REFRESH_DIR', path: sessions[activeId].currentDir })); };
-
-        window.enterDir = function(name) {
-            if(!activeId || !sessions[activeId].ws) return;
-            sessions[activeId].ws.send(JSON.stringify({ type: 'REFRESH_DIR', path: name === '..' ? getParentDir(sessions[activeId].currentDir) : joinPath(sessions[activeId].currentDir, name) }));
-        };
-
-        window.unzipFile = function(filename, e) {
-            e.stopPropagation();
-            if(!activeId || !sessions[activeId].ws) return;
-            const target = joinPath(sessions[activeId].currentDir, filename);
-            sessions[activeId].term.writeln(`\r\n\x1b[33m[System] 正在云端解压 ${target}，请稍候...\x1b[0m`);
-            sessions[activeId].ws.send(JSON.stringify({ type: 'UNZIP', path: target, dir: sessions[activeId].currentDir }));
-        };
-
-        window.downloadFile = function(filename, e) {
-            e.stopPropagation();
-            if(!activeId || !sessions[activeId].ws) return;
-            document.getElementById('saveIndicator').innerText = '⏳ Downloading...';
-            sessions[activeId].ws.send(JSON.stringify({ type: 'DOWNLOAD_FILE', path: joinPath(sessions[activeId].currentDir, filename) }));
-        };
+        window.enterDir = function(name) { if(!activeId || !sessions[activeId].ws) return; sessions[activeId].ws.send(JSON.stringify({ type: 'REFRESH_DIR', path: name === '..' ? getParentDir(sessions[activeId].currentDir) : joinPath(sessions[activeId].currentDir, name) })); };
+        window.unzipFile = function(filename, e) { e.stopPropagation(); if(!activeId || !sessions[activeId].ws) return; const target = joinPath(sessions[activeId].currentDir, filename); sessions[activeId].term.writeln(`\r\n\x1b[33m[System] 正在云端解压 ${target}，请稍候...\x1b[0m`); sessions[activeId].ws.send(JSON.stringify({ type: 'UNZIP', path: target, dir: sessions[activeId].currentDir })); };
+        window.downloadFile = function(filename, e) { e.stopPropagation(); if(!activeId || !sessions[activeId].ws) return; document.getElementById('saveIndicator').innerText = '⏳ Downloading...'; sessions[activeId].ws.send(JSON.stringify({ type: 'DOWNLOAD_FILE', path: joinPath(sessions[activeId].currentDir, filename) })); };
 
         window.openProcessModal = function() {
             if(!activeId || !sessions[activeId] || !sessions[activeId].ws) return;
@@ -310,14 +320,12 @@
             document.getElementById('sort-cpu').innerText = col === 'cpu' ? (currentSortDir === 'desc' ? '▼' : '▲') : '';
             renderFullProcessList();
         };
-
         function renderFullProcessList() {
             if (!activeId || !sessions[activeId] || !sessions[activeId].fullProcessList) return;
             let list = [...sessions[activeId].fullProcessList];
             list.sort((a, b) => { let valA, valB; if (currentSortCol === 'mem') { valA = parseMem(a.mem); valB = parseMem(b.mem); } else if (currentSortCol === 'cpu') { valA = parseFloat(a.cpu) || 0; valB = parseFloat(b.cpu) || 0; } return currentSortDir === 'desc' ? valB - valA : valA - valB; });
             document.getElementById('fullProcessListBody').innerHTML = list.map(p => `<tr><td style="color:#fff;">${p.pid}</td><td style="color:#dcb67a;">${p.user}</td><td style="color:#ffb86c; font-family:Consolas;">${p.mem}</td><td style="color:#ff5555; font-family:Consolas;">${p.cpu}</td><td style="color:#8be9fd;">${p.name}</td><td style="color:#6272a4;" title="${p.cmdline}">${p.cmdline}</td></tr>`).join('');
         }
-
         function formatUptime(seconds) {
             if(!seconds) return '--';
             const d = Math.floor(seconds / (3600*24)); const h = Math.floor(seconds % (3600*24) / 3600); const m = Math.floor(seconds % 3600 / 60);
@@ -333,19 +341,91 @@
             ]});
         }
         resetCharts();
-
         function renderProcesses(processes) {
             const container = document.getElementById('processListBody');
             if(!processes || processes.length === 0) { container.innerHTML = '<div style="padding:15px;color:#555;text-align:center;">暂无数据</div>'; return; }
             container.innerHTML = processes.map(p => `<div class="pt-row"><span class="pt-col-mem">${p.mem}</span><span class="pt-col-cpu">${p.cpu}</span><span class="pt-col-cmd">${p.cmd}</span></div>`).join('');
         }
 
-        function showLoginBox() { document.getElementById('loginOverlay').style.display = 'flex'; setTimeout(() => document.getElementById('loginOverlay').style.opacity = '1', 10); document.getElementById('closeLoginBtn').style.display = Object.keys(sessions).length > 0 ? 'block' : 'none'; }
-        function hideLoginBox() { document.getElementById('loginOverlay').style.opacity = '0'; setTimeout(() => document.getElementById('loginOverlay').style.display = 'none', 300); }
+        // ================= 【核心新增】：全局面板登录鉴权系统 =================
+        function showOverlay(id) { document.getElementById(id).style.display = 'flex'; setTimeout(() => document.getElementById(id).style.opacity = '1', 10); }
+        function hideOverlay(id) { document.getElementById(id).style.opacity = '0'; setTimeout(() => document.getElementById(id).style.display = 'none', 300); }
 
+        function initGlobalWs() {
+            if (globalWs) return;
+            globalWs = new WebSocket((window.location.protocol === 'https:' ? 'wss://' : 'ws://') + window.location.host + '/');
+            globalWs.onopen = () => {
+                const user = localStorage.getItem('panelUser'); const pass = localStorage.getItem('panelPass');
+                if (user && pass) {
+                    globalWs.send(JSON.stringify({ type: 'PANEL_LOGIN', user, pass }));
+                } else {
+                    showOverlay('panelAuthOverlay'); // 没存密码就弹窗
+                }
+            };
+            globalWs.onmessage = (e) => {
+                const packet = JSON.parse(e.data);
+                if (packet.type === 'LOGIN_SUCCESS') {
+                    hideOverlay('panelAuthOverlay');
+                    document.getElementById('authStatusBtn').innerText = '🟢 已认证';
+                    document.getElementById('authStatusBtn').style.borderColor = 'var(--accent)';
+                    renderSavedNodes(packet.nodes);
+                } else if (packet.type === 'LOGIN_FAIL') {
+                    alert(packet.msg); localStorage.removeItem('panelUser'); localStorage.removeItem('panelPass');
+                    showOverlay('panelAuthOverlay');
+                } else if (packet.type === 'SAVED_NODES_LIST') {
+                    renderSavedNodes(packet.nodes);
+                }
+            };
+            globalWs.onclose = () => { globalWs = null; setTimeout(initGlobalWs, 3000); };
+        }
+        
+        function doPanelLogin() {
+            const u = document.getElementById('panelUser').value.trim();
+            const p = document.getElementById('panelPass').value;
+            localStorage.setItem('panelUser', u); localStorage.setItem('panelPass', p);
+            if(globalWs && globalWs.readyState === WebSocket.OPEN) globalWs.send(JSON.stringify({ type: 'PANEL_LOGIN', user: u, pass: p }));
+            else initGlobalWs();
+        }
+
+        function renderSavedNodes(nodes) {
+            savedNodesCache = nodes || [];
+            const container = document.getElementById('savedNodeList');
+            if (savedNodesCache.length === 0) {
+                container.innerHTML = '<div style="padding: 10px; text-align: center; color: #666; font-size: 12px;">保险箱为空</div>';
+                return;
+            }
+            container.innerHTML = savedNodesCache.map(n => `
+                <div class="server-item" style="color:#dcb67a;">
+                    <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; padding-right: 10px;" title="${n.host}" onclick="connectSavedNode('${n.id}')">⚡ ${n.host}</span>
+                    <span class="close-btn" title="从保险箱删除" onclick="deleteSavedNode('${n.id}', event)">✖</span>
+                </div>
+            `).join('');
+        }
+
+        function deleteSavedNode(id, e) {
+            e.stopPropagation();
+            if(confirm('确定要从保险箱中永久删除此节点凭证吗？')) {
+                if(globalWs && globalWs.readyState === WebSocket.OPEN) globalWs.send(JSON.stringify({ type: 'DELETE_SAVED_NODE', id }));
+            }
+        }
+
+        function connectSavedNode(id) {
+            const node = savedNodesCache.find(n => n.id === id);
+            if(node) {
+                document.getElementById('host').value = node.host;
+                document.getElementById('port').value = node.port;
+                document.getElementById('user').value = node.user;
+                document.getElementById('pass').value = node.password || '';
+                document.getElementById('key').value = node.privateKey || '';
+                document.getElementById('saveNodeCheck').checked = false; // 已保存的不需要再保存
+                connectEngine();
+            }
+        }
+
+        // ================= 【终端连接流程】 =================
         function connectEngine() {
             const host = document.getElementById('host').value.trim(); const port = parseInt(document.getElementById('port').value) || 22; const user = document.getElementById('user').value.trim();
-            if(!host) return; const id = `${user}@${host}:${port}`; if(sessions[id]) return alert('已存在连接！'); hideLoginBox();
+            if(!host) return; const id = `${user}@${host}:${port}`; if(sessions[id]) return alert('已存在连接！'); hideOverlay('sshConnectOverlay');
 
             const termDiv = document.createElement('div'); termDiv.className = 'terminal-wrapper'; termDiv.id = `term_${id.replace(/\W/g, '_')}`; document.getElementById('terminalsContainer').appendChild(termDiv);
             const term = new Terminal({ cursorBlink: true, theme: { background: '#000', foreground: '#a0c2a8' }, fontFamily: 'Consolas' }); const fitAddon = new FitAddon.FitAddon(); term.loadAddon(fitAddon); term.open(termDiv);
@@ -355,30 +435,37 @@
             termDiv.addEventListener('drop', (e) => {
                 e.preventDefault(); termDiv.style.boxShadow = 'none';
                 if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-                    const file = e.dataTransfer.files[0];
-                    const targetPath = joinPath(sessions[id].currentDir, file.name);
+                    const file = e.dataTransfer.files[0]; const targetPath = joinPath(sessions[id].currentDir, file.name);
                     term.writeln(`\r\n\x1b[33m[黑洞传送门] 正在极速直穿 SFTP 写入至: ${targetPath} (${(file.size/1024).toFixed(1)} KB)...\x1b[0m`);
-                    const reader = new FileReader();
-                    reader.onload = (ev) => { if (sessions[id].ws) sessions[id].ws.send(JSON.stringify({ type: 'UPLOAD_FILE', path: targetPath, dir: sessions[id].currentDir, data: ev.target.result.split(',')[1] })); };
-                    reader.readAsDataURL(file);
+                    const reader = new FileReader(); reader.onload = (ev) => { if (sessions[id].ws) sessions[id].ws.send(JSON.stringify({ type: 'UPLOAD_FILE', path: targetPath, dir: sessions[id].currentDir, data: ev.target.result.split(',')[1] })); }; reader.readAsDataURL(file);
                 }
             });
 
             sessions[id] = { id, host, ws: null, term, fitAddon, termDiv, filesHTML: '<div style="color:#666;text-align:center;">拉取目录中...</div>', selectedNode: null, currentDir: '/root', currentOpenFilePath: null, processes: [], fullProcessList: null, rxSpeed: 0, txSpeed: 0, uptime: 0, load: '0.00 0.00 0.00', swap: 0 };
             term.writeln('\x1b[33m[Engine]\x1b[0m 向集群分配节点中...');
+            
             const ws = new WebSocket((window.location.protocol === 'https:' ? 'wss://' : 'ws://') + window.location.host + '/'); sessions[id].ws = ws;
-
             term.onData(data => { if(ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'TERMINAL_INPUT', data })); });
-            ws.onopen = () => { const creds = { host, port, username: user }; const pass = document.getElementById('pass').value; const key = document.getElementById('key').value.trim(); if (key) { creds.privateKey = key; if (pass) creds.passphrase = pass; } else { creds.password = pass; } ws.send(JSON.stringify(creds)); };
+            
+            ws.onopen = () => { 
+                const creds = { host, port, username: user, id: 'node_' + Date.now() }; 
+                const pass = document.getElementById('pass').value; const key = document.getElementById('key').value.trim(); 
+                if (key) { creds.privateKey = key; if (pass) creds.passphrase = pass; } else { creds.password = pass; } 
+                ws.send(JSON.stringify(creds)); 
+                
+                // 【核心新增】：触发保存节点
+                const isSave = document.getElementById('saveNodeCheck').checked;
+                if(isSave && globalWs && globalWs.readyState === WebSocket.OPEN) {
+                    globalWs.send(JSON.stringify({ type: 'SAVE_NODE', node: creds }));
+                }
+            };
 
             ws.onmessage = (e) => {
                 const packet = JSON.parse(e.data);
                 if (packet.type === 'TERMINAL' || packet.type === 'SYSTEM_MSG') term.write(packet.data);
                 else if (packet.type === 'SFTP_TREE') {
-                    sessions[id].currentDir = packet.path;
-                    let html = '';
+                    sessions[id].currentDir = packet.path; let html = '';
                     if (packet.path !== '/') html += `<div class="file-item" ondblclick="enterDir('..')"><div style="flex:1; text-align:left;"><span class="icon-dir">🔙</span> .. (上一级)</div></div>`;
-                    
                     html += packet.files.map(f => {
                         const isZip = f.name.endsWith('.zip') || f.name.endsWith('.tar.gz') || f.name.endsWith('.tgz');
                         const unzipBtn = (!f.isDir && isZip) ? `<span class="f-action" title="云端秒解压" onclick="unzipFile('${f.name}', event)">📦</span>` : '';
@@ -386,23 +473,16 @@
                         const dblClick = f.isDir ? `ondblclick="enterDir('${f.name}')"` : `ondblclick="openFile('${f.name}')"`;
                         return `<div class="file-item" onclick="selectFileDom(this, '${f.name}', ${f.isDir})" ${dblClick}><div style="flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; text-align:left;">${f.isDir?'<span class="icon-dir">📁</span>':'<span class="icon-file">📄</span>'} ${f.name}</div><div class="f-actions-inline">${unzipBtn}${downloadBtn}</div></div>`;
                     }).join('');
-                    
-                    sessions[id].filesHTML = html;
-                    if(sessions[id].selectedNode && !packet.files.some(f => f.name === sessions[id].selectedNode.name)) sessions[id].selectedNode = null;
-                    if(activeId === id) updateActiveUI();
+                    sessions[id].filesHTML = html; if(sessions[id].selectedNode && !packet.files.some(f => f.name === sessions[id].selectedNode.name)) sessions[id].selectedNode = null; if(activeId === id) updateActiveUI();
                 }
                 else if (packet.type === 'DOWNLOAD_READY') {
-                    const link = document.createElement('a'); link.href = 'data:application/octet-stream;base64,' + packet.data; link.download = packet.filename;
-                    document.body.appendChild(link); link.click(); document.body.removeChild(link);
-                    document.getElementById('saveIndicator').innerText = '✔ Download Success';
-                    setTimeout(() => { document.getElementById('saveIndicator').innerText = 'Save (Ctrl+S)'; document.getElementById('saveIndicator').style.color = '#fff'; }, 3000);
+                    const link = document.createElement('a'); link.href = 'data:application/octet-stream;base64,' + packet.data; link.download = packet.filename; document.body.appendChild(link); link.click(); document.body.removeChild(link);
+                    document.getElementById('saveIndicator').innerText = '✔ Download Success'; setTimeout(() => { document.getElementById('saveIndicator').innerText = 'Save (Ctrl+S)'; document.getElementById('saveIndicator').style.color = '#fff'; }, 3000);
                 }
                 else if (packet.type === 'FILE_CONTENT') {
                     if (activeId === id) { document.getElementById('currentFileName').innerText = packet.filename; sessions[activeId].currentOpenFilePath = packet.path; editor.setValue(packet.content, -1); editor.session.setMode(`ace/mode/${{'js':'javascript','json':'json','html':'html','css':'css','sh':'sh','bash':'sh','py':'python','yaml':'yaml','yml':'yaml','conf':'ini','xml':'xml'}[packet.filename.split('.').pop().toLowerCase()] || 'text'}`); }
                 }
-                else if (packet.type === 'FULL_PROCESS_LIST') {
-                    if (activeId === id) { sessions[id].fullProcessList = packet.list; renderFullProcessList(); }
-                }
+                else if (packet.type === 'FULL_PROCESS_LIST') { if (activeId === id) { sessions[id].fullProcessList = packet.list; renderFullProcessList(); } }
                 else if (packet.type === 'MONITOR') {
                     sessions[id].processes = packet.processes || []; sessions[id].rxSpeed = packet.rxSpeed; sessions[id].txSpeed = packet.txSpeed; sessions[id].uptime = packet.uptime; sessions[id].load = packet.load; sessions[id].swap = packet.swap;
                     if(activeId === id) {
@@ -412,50 +492,27 @@
                 }
             };
             ws.onclose = () => term.writeln('\r\n\x1b[31m[System]\x1b[0m 节点连接断开。'); ws.onerror = () => term.writeln('\r\n\x1b[31m[System]\x1b[0m WebSocket 隧道建立失败。');
-            
-            // 这里只需执行一次，内部会调用 renderServerList
             switchSession(id); 
         }
 
-        window.selectFileDom = function(el, name, isDir) { document.querySelectorAll('.file-item').forEach(e => e.classList.remove('selected')); el.classList.add('selected'); if (activeId && sessions[activeId]) sessions[activeId].selectedNode = { name, isDir }; };
-        
         function switchSession(id) {
-            if(!sessions[id]) return; activeId = id; document.querySelectorAll('.terminal-wrapper').forEach(el => el.classList.remove('active')); sessions[id].termDiv.classList.add('active');
-            setTimeout(() => sessions[id].fitAddon.fit(), 50); 
-            
-            // 【核心修复】：移除了导致报错的 currentFileHost 代码
-            document.getElementById('currentTermHost').innerText = sessions[id].id;
-            
+            if(!sessions[id]) return; activeId = id; document.querySelectorAll('.terminal-wrapper').forEach(el => el.classList.remove('active')); sessions[id].termDiv.classList.add('active'); setTimeout(() => sessions[id].fitAddon.fit(), 50); document.getElementById('currentTermHost').innerText = sessions[id].id;
             gaugeChart.setOption({ series: [{ data: [{ value: (sessions[id].cpu || 0).toFixed(1), name: 'CPU' }] }, { data: [{ value: (sessions[id].mem || 0).toFixed(1), name: 'RAM' }] }, { data: [{ value: (sessions[id].swap || 0).toFixed(1), name: 'SWAP' }] }] });
             renderProcesses(sessions[id].processes); document.getElementById('sysUptime').innerText = formatUptime(sessions[id].uptime); document.getElementById('sysLoad').innerText = sessions[id].load || '--'; document.getElementById('sysRx').innerText = (sessions[id].rxSpeed !== undefined ? sessions[id].rxSpeed : '--') + ' KB/s'; document.getElementById('sysTx').innerText = (sessions[id].txSpeed !== undefined ? sessions[id].txSpeed : '--') + ' KB/s';
-            
             renderServerList(); updateActiveUI();
         }
-
         function closeSession(id, event) {
             event.stopPropagation(); if(sessions[id].ws) sessions[id].ws.close(); sessions[id].term.dispose(); sessions[id].termDiv.remove(); delete sessions[id];
-            if(activeId === id) { 
-                const remaining = Object.keys(sessions); 
-                if(remaining.length > 0) switchSession(remaining[0]); 
-                else { 
-                    activeId = null; 
-                    // 【核心修复】：同步移除
-                    document.getElementById('currentTermHost').innerText = 'bash'; document.getElementById('fileManager').innerHTML = '<div style="text-align: center; margin-top: 10px;">无连接的节点</div>'; document.getElementById('currentDirPath').innerText = '📁 /root'; document.getElementById('currentDirPath').title = '📁 /root'; renderProcesses([]); resetCharts(); document.getElementById('sysUptime').innerText = '--'; document.getElementById('sysLoad').innerText = '--'; document.getElementById('sysRx').innerText = '-- KB/s'; document.getElementById('sysTx').innerText = '-- KB/s'; showLoginBox(); 
-                } 
-            }
+            if(activeId === id) { const remaining = Object.keys(sessions); if(remaining.length > 0) switchSession(remaining[0]); else { activeId = null; document.getElementById('currentTermHost').innerText = 'bash'; document.getElementById('fileManager').innerHTML = '<div style="text-align: center; margin-top: 10px;">无连接的节点</div>'; document.getElementById('currentDirPath').innerText = '📁 /root'; document.getElementById('currentDirPath').title = '📁 /root'; renderProcesses([]); resetCharts(); document.getElementById('sysUptime').innerText = '--'; document.getElementById('sysLoad').innerText = '--'; document.getElementById('sysRx').innerText = '-- KB/s'; document.getElementById('sysTx').innerText = '-- KB/s'; } }
             renderServerList();
         }
-
-        function renderServerList() { 
-            const keys = Object.keys(sessions); 
-            document.getElementById('nodeCount').innerText = keys.length; 
-            document.getElementById('serverList').innerHTML = keys.map(id => `<div class="server-item ${id === activeId ? 'active' : ''}" onclick="switchSession('${id}')"><span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; padding-right: 10px;" title="${sessions[id].host}">🖥️ ${sessions[id].host}</span><span class="close-btn" onclick="closeSession('${id}', event)">✖</span></div>`).join(''); 
-        }
-
+        function renderServerList() { const keys = Object.keys(sessions); document.getElementById('nodeCount').innerText = keys.length; document.getElementById('serverList').innerHTML = keys.map(id => `<div class="server-item ${id === activeId ? 'active' : ''}" onclick="switchSession('${id}')"><span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; padding-right: 10px;" title="${sessions[id].host}">🖥️ ${sessions[id].host}</span><span class="close-btn" onclick="closeSession('${id}', event)">✖</span></div>`).join(''); }
         function updateActiveUI() { if(activeId && sessions[activeId]) { document.getElementById('fileManager').innerHTML = sessions[activeId].filesHTML; document.getElementById('currentDirPath').innerText = '📁 ' + sessions[activeId].currentDir; document.getElementById('currentDirPath').title = '📁 ' + sessions[activeId].currentDir; if(sessions[activeId].selectedNode) { const items = document.querySelectorAll('.file-item'); for(let i=0; i<items.length; i++) { if(items[i].innerText.includes(sessions[activeId].selectedNode.name)) { items[i].classList.add('selected'); break; } } } } }
-        
         window.addEventListener('resize', () => { if(activeId && sessions[activeId]) sessions[activeId].fitAddon.fit(); });
         window.openFile = function(filename) { if(!activeId || !sessions[activeId] || !sessions[activeId].ws) return; const targetPath = joinPath(sessions[activeId].currentDir, filename); document.getElementById('currentFileName').innerText = filename; editor.setValue(`// 正在从节点拉取文件流: ${targetPath} \n// 🚀 Engine Requesting...`, -1); sessions[activeId].ws.send(JSON.stringify({ type: 'READ_FILE', path: targetPath })); };
+
+        // 页面启动时初始化安全鉴权通道
+        window.onload = () => { initGlobalWs(); };
     </script>
 </body>
 </html>
