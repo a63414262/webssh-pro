@@ -2,14 +2,14 @@
 # 🚀 WebSSH Pro | Master OS 集群终极堡垒机
 
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
-![Version](https://img.shields.io/badge/version-7.0.0%20Ultimate-green.svg)
-![Security](https://img.shields.io/badge/security-AES--256--GCM-red.svg)
+![Version](https://img.shields.io/badge/version-8.0.0%20Ultimate-green.svg)
+![Security](https://img.shields.io/badge/security-Zero--Knowledge%20%7C%20AES--256-red.svg)
 ![Docker](https://img.shields.io/badge/docker-ready-brightgreen.svg)
 
 **WebSSH Pro** 是一个基于 Node.js 的全栈 Serverless 跨平台 WebSSH 客户端与服务器集群管理面板。
 它打破了传统 Web 终端的极限，将你的浏览器彻底改造为一个强大的**迷你云端操作系统**与**零信任安全堡垒机**。
 
-内置全局哈希鉴权、内存级 JIT AES-256 加密保险箱、全自动 WARP IPv6 穿透、Fail2Ban 绝对防御、全盘漫游云盘、黑洞拖拽秒传、云端弹药库（常用命令保存）与上帝广播模式。专为极客与批量管理多台 VPS 打造的终极运维神器。
+内置全局哈希鉴权、内存级 JIT AES-256 加密保险箱、云端弹药库（常用命令库）、全自动 WARP IPv6 穿透、带白名单的 Fail2Ban 绝对防御、全盘漫游云盘、黑洞拖拽秒传与上帝广播模式。专为极客与批量管理多台 VPS 打造的终极运维神器。
 
 📺 **作者 YouTube 频道**: [小K分享](https://www.youtube.com/@%E5%B0%8FK%E5%88%86%E4%BA%AB)
 
@@ -18,17 +18,19 @@
 ## ✨ 核心黑科技 (Features)
 
 ### 🔐 零知识绝对领域 (Zero-Knowledge Security)
-- **哈希鉴权隔离**：环境变量中**绝对不存储明文密码**，仅存储密码的 SHA-256 哈希值，即使平台漏洞导致配置泄露，黑客也无法逆向出真实密码。
-- **JIT 内存级加密**：输入的面板密码将在 WebSocket 内存中动态转化为 32 字节 AES-256-GCM 密钥。你的节点凭证与常用命令落地存储时全部为极高强度的密文，断开连接密钥即刻销毁 (GC)，实现真正的“拔网线即物理断绝”。
-- **双模运行 (Admin / Guest)**：不输入密码默认进入「无痕访客模式」，所有凭证阅后即焚，不留任何痕迹；登录后解锁「云端保险箱」，享受极客专属存储。
+- **哈希鉴权隔离**：环境变量中**绝对不存储明文密码**，仅存储密码的 SHA-256 哈希值，即使平台 0day 漏洞导致配置泄露，黑客也无法逆向出真实密码。
+- **JIT 内存级加密**：输入的面板密码将在 WebSocket 内存中动态转化为 32 字节 AES-256-GCM 密钥。你的节点凭证与常用命令落地存储时全部为极高强度的密文，断开连接密钥即刻销毁 (GC)，实现真正的“拔网线即物理隔离”。
+- **内置离线 Hash 工具**：登录界面自带纯前端的 Hash 生成器，不走网络，本地计算，告别繁琐的命令行操作。
+- **双模运行 (Admin / Guest)**：不输入密码默认进入「无痕访客体验模式」，所有凭证阅后即焚，不留任何痕迹；登录后解锁「云端保险箱」，享受极客专属存储。
 
-### ⚡ 云端弹药库与上帝广播 (Cloud Arsenal & God Mode)
-- **常用命令保险箱**：新增双选项卡切换。你可以将冗长的环境配置脚本（如换内核、装面板等）加密保存至云端，一键点击 `▶ 运行`，瞬间触发。
+### ⚡ 云端双保险箱与上帝广播 (Cloud Arsenal & God Mode)
+- **节点保险箱 (带自定义别名)**：密码与私钥高强度加密存储至云端，支持**双击重命名节点别名**，一键秒连。
+- **弹药库保险箱 (常用命令)**：新增编辑器/常用命令双选项卡。可将冗长的环境配置脚本加密保存至云端，点击 `▶ 运行` 瞬间触发。
 - **上帝广播模式 (Multi-Execution)**：顶部专属全局命令框，敲击一次回车，命令将同步分发执行到所有已连接的在线集群节点，实现降维打击般的批量管理。
 
 ### 🛡️ 内存级 Fail2Ban 防爆破 (Active Defense)
 - **前置拦截**：安全防线前置到 Web 路由层。同一公网 IP 连续 5 次 SSH 或面板鉴权失败，直接打入内存黑洞，物理封禁 24 小时。
-- **无损防御**：被封禁的 IP 发起的任何后续请求会被瞬间掐断 (Drop)，绝不消耗底层服务器的任何 SSH 握手资源。
+- **站长免死金牌 (IP Whitelist)**：支持配置专属 IP 白名单，彻底告别被自己系统误杀的尴尬。
 
 ### 📁 全盘漫游与黑洞秒传 (Advanced SFTP)
 - **全盘动态下钻**：突破 `/root` 限制，支持双击文件夹无缝下钻，支持退回根目录 `/`，实现真正的 Linux 全盘漫游。
@@ -37,7 +39,7 @@
 - **Ace Editor 云编**：双击文件拉取代码，支持数十种语法高亮，`Ctrl+S` 热键劫持直连物理机覆盖保存。
 
 ### 🌐 WARP IPv6 穿透 & 电竞级态势感知
-- **零配置点火**：容器启动即全自动向 Cloudflare 申请 WARP 节点，并建立底层的 SOCKS5 隐形隧道，完美拯救各类无 IPv6 网络的纯净 Serverless 容器！
+- **零配置点火**：容器启动即全自动向 Cloudflare 申请 WARP 节点，并建立底层的 SOCKS5 隐形隧道，完美拯救各类无 IPv6 网络的纯净 Serverless 容器（如 ClawCloud）！
 - **三擎表盘 & 进程调度**：实时独立监控 CPU、RAM 与 **SWAP (虚拟内存)**。支持纯前端无缝排序的 Top 100 进程实时快照，数据每 2 秒极致刷新。
 
 ---
@@ -66,30 +68,25 @@ ghcr.io/a63414262/webssh-pro:latest
   - **内存 (Memory)**: ⚠️ 至少需分配 `512MB` (用于承载 AES-256 加密运算与底层的 WARP 网络引擎)
   - **暴露端口 (Port)**: `8080` (开启公网访问)
 
-### 3\. 配置环境变量 (极其重要 ⚠️)
+### 3\. 配置环境变量 (Environment Variables) ⚠️
 
-为了极致的安全，本系统**不接受明文密码**。你需要先计算出你想要的密码的 **SHA-256 哈希值**。
+为了极致的安全，本系统**不接受明文密码**。
+部署时，你可以直接访问未配置密码的面板，点击登录框下方的 **“🔧 算不出 Hash？点我一键生成”** 获取你专属的 Hash 值。
 
-**如何计算 Hash？**
-在任何 Linux/macOS 终端执行（替换 `你的复杂密码`）：
-
-```bash
-echo -n "你的复杂密码" | sha256sum
-```
-
-*(你也可以使用网上的在线 SHA-256 计算工具计算密码的 Hash 值)*
-
-**在云平台填入以下环境变量：**
+在云平台填入以下环境变量：
 
 ```text
 TZ=Asia/Shanghai
 NODE_ENV=production
 PORT=8080
+
+# --- 面板零信任鉴权配置 ---
 PANEL_USER=admin                         # 你的自定义面板账号
-PANEL_PASS_HASH=8d969eef6ecad3c29a3a...  # 刚才算出来的 64 位 Hash 密文
+PANEL_PASS_HASH=8d969eef6ecad3c29a3a...  # 面板生成的 64 位 SHA-256 Hash 密文
+PANEL_IP_WHITELIST=1.1.1.1, 8.8.8.8      # (可选) IP 白名单，防止站长被防爆破系统误封
 ```
 
-*(注：如果完全不填写 `PANEL_USER` 和 `PANEL_PASS_HASH`，系统将默认锁定为无痕访客模式)*
+*(注：如果不填写 `PANEL_USER` 和 `PANEL_PASS_HASH`，系统将默认永久锁定为「无痕访客体验模式」)*
 
 -----
 
