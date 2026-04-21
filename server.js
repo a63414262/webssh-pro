@@ -45,11 +45,9 @@ wss.on('connection', (ws, req) => {
 
     if (ipBlocklist.has(clientIp)) {
         if (Date.now() < ipBlocklist.get(clientIp)) {
-            ws.send(JSON.stringify({ type: 'TERMINAL', data: `\r\n\x1b[1;41;37m [ 绝对防御 ] \x1b[0m\x1b[31m IP (${clientIp}) 已被物理隔离 24 小时！\x1b[0m\r\n` }));
+            ws.send(JSON.stringify({ type: 'TERMINAL', data: `\r\n\x1b[1;41;37m [ 绝对防御 ] \x1b[0m\x1b[31m IP (${clientIp}) 已被物理隔离！\x1b[0m\r\n` }));
             return ws.close();
-        } else {
-            ipBlocklist.delete(clientIp); ipAttempts.delete(clientIp);
-        }
+        } else { ipBlocklist.delete(clientIp); ipAttempts.delete(clientIp); }
     }
 
     let sshClient = new Client();
@@ -57,11 +55,17 @@ wss.on('connection', (ws, req) => {
     let sftpSession = null;
     let monitorInterval = null;
 
-    const sendDirTree = (sftp) => {
-        sftp.readdir('/root', (err, list) => {
+    // 【核心重构】：支持动态路径请求，并过滤系统自带的隐藏父节点
+    const sendDirTree = (sftp, targetPath = '/root') => {
+        sftp.readdir(targetPath, (err, list) => {
             if (!err) {
-                const files = list.map(item => ({ name: item.filename, isDir: item.longname.startsWith('d'), size: item.attrs.size })).sort((a, b) => b.isDir - a.isDir);
-                ws.send(JSON.stringify({ type: 'SFTP_TREE', files }));
+                const files = list
+                    .filter(item => item.filename !== '.' && item.filename !== '..') // 过滤默认点号
+                    .map(item => ({ name: item.filename, isDir: item.longname.startsWith('d'), size: item.attrs.size }))
+                    .sort((a, b) => b.isDir - a.isDir);
+                ws.send(JSON.stringify({ type: 'SFTP_TREE', path: targetPath, files }));
+            } else {
+                ws.send(JSON.stringify({ type: 'SYSTEM_MSG', data: `\r\n\x1b[31m[System] 读取目录 ${targetPath} 失败: ${err.message}\x1b[0m\r\n` }));
             }
         });
     };
@@ -78,12 +82,12 @@ wss.on('connection', (ws, req) => {
                     sshClient.shell({ term: 'xterm-256color' }, (err, stream) => {
                         if (err) return ws.close();
                         sshStream = stream;
-                        ws.send(JSON.stringify({ type: 'TERMINAL', data: '\r\n\x1b[32m[System]\x1b[0m 🚀 OS 核心启动，终端连接成功。您可以直接将文件拖拽至此窗口进行秒传。\r\n\r\n' }));
+                        ws.send(JSON.stringify({ type: 'TERMINAL', data: '\r\n\x1b[32m[System]\x1b[0m 🚀 OS 核心启动，终端连接成功。\r\n\r\n' }));
                         stream.on('data', (d) => ws.send(JSON.stringify({ type: 'TERMINAL', data: d.toString('utf8') })));
                         stream.on('close', () => ws.close());
                     });
 
-                    sshClient.sftp((err, sftp) => { if (!err) { sftpSession = sftp; sendDirTree(sftpSession); } });
+                    sshClient.sftp((err, sftp) => { if (!err) { sftpSession = sftp; sendDirTree(sftpSession, '/root'); } });
 
                     sshClient.lastRx = undefined; sshClient.lastTx = undefined;
 
@@ -97,19 +101,15 @@ wss.on('connection', (ws, req) => {
                                     const cpu = parseFloat(p[0]) || 0; const mem = parseFloat(p[1]) || 0; const swap = parseFloat(p[2]) || 0;
                                     const netParts = p[3].split(/\s+/); const currentRx = parseFloat(netParts[0]) || 0; const currentTx = parseFloat(netParts[1]) || 0;
                                     const uptime = parseFloat(p[4]) || 0; const load = p[5] || '0.00 0.00 0.00';
-                                    
                                     let rxSpeed = 0, txSpeed = 0;
                                     if (sshClient.lastRx !== undefined && currentRx >= sshClient.lastRx) { rxSpeed = (currentRx - sshClient.lastRx) / 1024 / 2; txSpeed = (currentTx - sshClient.lastTx) / 1024 / 2; }
                                     sshClient.lastRx = currentRx; sshClient.lastTx = currentTx;
-
-                                    const processLines = p.slice(6);
-                                    const processes = processLines.map(line => {
+                                    const processes = p.slice(6).map(line => {
                                         const parts = line.trim().split(/\s+/);
                                         if(parts.length >= 3) {
                                             let rss = parseInt(parts[0]); let memStr = rss > 1024 ? (rss/1024).toFixed(1) + 'M' : rss + 'K'; if (rss === 0) memStr = '0';
                                             return { mem: memStr, cpu: parts[1], cmd: parts.slice(2).join(' ') };
-                                        }
-                                        return null;
+                                        } return null;
                                     }).filter(Boolean);
                                     ws.send(JSON.stringify({ type: 'MONITOR', cpu, mem, swap, rxSpeed: parseFloat(rxSpeed.toFixed(1)), txSpeed: parseFloat(txSpeed.toFixed(1)), uptime, load, processes }));
                                 }
@@ -122,10 +122,8 @@ wss.on('connection', (ws, req) => {
                     if (ws.readyState === WebSocket.OPEN) {
                         if (err.message.toLowerCase().includes('authenticat') || err.message.includes('Handshake failed')) {
                             let attempts = (ipAttempts.get(clientIp) || 0) + 1; ipAttempts.set(clientIp, attempts);
-                            if (attempts >= MAX_ATTEMPTS) {
-                                ipBlocklist.set(clientIp, Date.now() + BLOCK_TIME);
-                                ws.send(JSON.stringify({ type: 'TERMINAL', data: `\r\n\x1b[1;41;37m [ 警报 ] \x1b[0m\x1b[31m 触发防爆破保护，您的 IP 已封禁 24 小时。\x1b[0m\r\n` }));
-                            } else ws.send(JSON.stringify({ type: 'TERMINAL', data: `\r\n\x1b[31m[SSH 鉴权失败]:\x1b[0m 密码或私钥错误！(剩余尝试: ${MAX_ATTEMPTS - attempts})\r\n` }));
+                            if (attempts >= MAX_ATTEMPTS) { ipBlocklist.set(clientIp, Date.now() + BLOCK_TIME); ws.send(JSON.stringify({ type: 'TERMINAL', data: `\r\n\x1b[1;41;37m [ 警报 ] \x1b[0m\x1b[31m IP 已被封禁！\x1b[0m\r\n` })); } 
+                            else ws.send(JSON.stringify({ type: 'TERMINAL', data: `\r\n\x1b[31m[SSH 鉴权失败]:\x1b[0m 密码或私钥错误！\r\n` }));
                         } else ws.send(JSON.stringify({ type: 'TERMINAL', data: `\r\n\x1b[31m[SSH Error]:\x1b[0m ${err.message}\r\n` }));
                         ws.close();
                     }
@@ -143,42 +141,39 @@ wss.on('connection', (ws, req) => {
                 const cmd = JSON.parse(message);
                 if (cmd.type === 'TERMINAL_INPUT' && sshStream) sshStream.write(cmd.data);
                 
-                // 【云端流式解压缩引擎】
+                // 【核心重构】：所有操作全面接管并使用动态绝对路径 cmd.path 和 cmd.dir
                 else if (cmd.type === 'UNZIP' && sshClient) {
-                    const ext = cmd.filename.toLowerCase();
+                    const ext = cmd.path.toLowerCase();
                     let execCmd = '';
-                    if (ext.endsWith('.zip')) execCmd = `unzip -o "/root/${cmd.filename}" -d "/root/"`;
-                    else if (ext.endsWith('.tar.gz') || ext.endsWith('.tgz')) execCmd = `tar -xzf "/root/${cmd.filename}" -C "/root/"`;
+                    if (ext.endsWith('.zip')) execCmd = `unzip -o "${cmd.path}" -d "${cmd.dir}"`;
+                    else if (ext.endsWith('.tar.gz') || ext.endsWith('.tgz')) execCmd = `tar -xzf "${cmd.path}" -C "${cmd.dir}"`;
                     
                     if (execCmd) {
                         sshClient.exec(execCmd, (err, stream) => {
                             if (err) return ws.send(JSON.stringify({ type: 'SYSTEM_MSG', data: `\r\n\x1b[31m[System] 解压失败: ${err.message}\x1b[0m\r\n` }));
                             stream.on('close', () => {
-                                ws.send(JSON.stringify({ type: 'SYSTEM_MSG', data: `\r\n\x1b[32m[System] 📦 文件 ${cmd.filename} 云端解压完成！\x1b[0m\r\n` }));
-                                sendDirTree(sftpSession);
+                                ws.send(JSON.stringify({ type: 'SYSTEM_MSG', data: `\r\n\x1b[32m[System] 📦 文件解压完成！\x1b[0m\r\n` }));
+                                sendDirTree(sftpSession, cmd.dir);
                             });
                         });
                     }
                 }
-                // 【云端文件下载】
                 else if (cmd.type === 'DOWNLOAD_FILE' && sftpSession) {
-                    sftpSession.readFile(`/root/${cmd.filename}`, (err, data) => {
+                    sftpSession.readFile(cmd.path, (err, data) => {
                         if (err) ws.send(JSON.stringify({ type: 'SYSTEM_MSG', data: `\r\n\x1b[31m[System] 下载失败: ${err.message}\x1b[0m\r\n` }));
-                        else ws.send(JSON.stringify({ type: 'DOWNLOAD_READY', filename: cmd.filename, data: data.toString('base64') }));
+                        else ws.send(JSON.stringify({ type: 'DOWNLOAD_READY', filename: cmd.path.split('/').pop(), data: data.toString('base64') }));
                     });
                 }
-                // 【终端黑洞秒传 (上传)】
                 else if (cmd.type === 'UPLOAD_FILE' && sftpSession) {
                     const buffer = Buffer.from(cmd.data, 'base64');
-                    sftpSession.writeFile(`/root/${cmd.filename}`, buffer, (err) => {
+                    sftpSession.writeFile(cmd.path, buffer, (err) => {
                         if (err) ws.send(JSON.stringify({ type: 'SYSTEM_MSG', data: `\r\n\x1b[31m[System] 上传失败: ${err.message}\x1b[0m\r\n` }));
                         else {
-                            ws.send(JSON.stringify({ type: 'SYSTEM_MSG', data: `\r\n\x1b[32m[System] 🚀 终端秒传成功：已保存至 /root/${cmd.filename} \x1b[0m\r\n` }));
-                            sendDirTree(sftpSession);
+                            ws.send(JSON.stringify({ type: 'SYSTEM_MSG', data: `\r\n\x1b[32m[System] 🚀 秒传成功：保存至 ${cmd.path} \x1b[0m\r\n` }));
+                            sendDirTree(sftpSession, cmd.dir);
                         }
                     });
                 }
-                
                 else if (cmd.type === 'GET_PROCESS_LIST' && sshClient) {
                     sshClient.exec(`export LC_ALL=C; ps -eo pid,user,rss,pcpu,comm,args --sort=-%cpu | head -n 101`, (e, stream) => {
                         if (e) return; let out = ''; stream.on('data', d => out += d.toString());
@@ -192,13 +187,13 @@ wss.on('connection', (ws, req) => {
                         });
                     });
                 }
-                else if (cmd.type === 'READ_FILE' && sftpSession) { sftpSession.readFile(`/root/${cmd.filename}`, 'utf8', (err, data) => { ws.send(JSON.stringify({ type: 'FILE_CONTENT', filename: cmd.filename, content: err ? `// 读取失败: ${err.message}` : data })); }); }
-                else if (cmd.type === 'WRITE_FILE' && sftpSession) { sftpSession.writeFile(`/root/${cmd.filename}`, cmd.content, 'utf8', (err) => { ws.send(JSON.stringify({ type: 'SYSTEM_MSG', data: err ? `\r\n\x1b[31m[System] 保存失败: ${err.message}\x1b[0m\r\n` : `\r\n\x1b[32m[System] 📝 文件 ${cmd.filename} 成功保存！\x1b[0m\r\n` })); if(!err) sendDirTree(sftpSession); }); }
-                else if (cmd.type === 'CREATE_FILE' && sftpSession) { sftpSession.writeFile(`/root/${cmd.filename}`, '', 'utf8', (err) => { if (!err) { ws.send(JSON.stringify({ type: 'SYSTEM_MSG', data: `\r\n\x1b[32m[System] 📄 创建文件: ${cmd.filename}\x1b[0m\r\n` })); sendDirTree(sftpSession); } }); }
-                else if (cmd.type === 'CREATE_DIR' && sftpSession) { sftpSession.mkdir(`/root/${cmd.dirname}`, (err) => { if (!err) { ws.send(JSON.stringify({ type: 'SYSTEM_MSG', data: `\r\n\x1b[32m[System] 📁 创建文件夹: ${cmd.dirname}\x1b[0m\r\n` })); sendDirTree(sftpSession); } }); }
-                else if (cmd.type === 'DELETE_NODE' && sftpSession) { const targetPath = `/root/${cmd.filename}`; if (cmd.isDir) { sftpSession.rmdir(targetPath, (err) => { if(!err) { ws.send(JSON.stringify({ type: 'SYSTEM_MSG', data: `\r\n\x1b[32m[System] 🗑️ 删除文件夹: ${cmd.filename}\x1b[0m\r\n` })); sendDirTree(sftpSession); } }); } else { sftpSession.unlink(targetPath, (err) => { if(!err) { ws.send(JSON.stringify({ type: 'SYSTEM_MSG', data: `\r\n\x1b[32m[System] 🗑️ 删除文件: ${cmd.filename}\x1b[0m\r\n` })); sendDirTree(sftpSession); } }); } }
-                else if (cmd.type === 'RENAME_NODE' && sftpSession) { sftpSession.rename(`/root/${cmd.oldName}`, `/root/${cmd.newName}`, (err) => { if(!err) { ws.send(JSON.stringify({ type: 'SYSTEM_MSG', data: `\r\n\x1b[32m[System] ✏️ 重命名: ${cmd.oldName} -> ${cmd.newName}\x1b[0m\r\n` })); sendDirTree(sftpSession); } }); }
-                else if (cmd.type === 'REFRESH_DIR' && sftpSession) sendDirTree(sftpSession);
+                else if (cmd.type === 'READ_FILE' && sftpSession) { sftpSession.readFile(cmd.path, 'utf8', (err, data) => { ws.send(JSON.stringify({ type: 'FILE_CONTENT', filename: cmd.path.split('/').pop(), path: cmd.path, content: err ? `// 读取失败: ${err.message}` : data })); }); }
+                else if (cmd.type === 'WRITE_FILE' && sftpSession) { sftpSession.writeFile(cmd.path, cmd.content, 'utf8', (err) => { ws.send(JSON.stringify({ type: 'SYSTEM_MSG', data: err ? `\r\n\x1b[31m[System] 保存失败: ${err.message}\x1b[0m\r\n` : `\r\n\x1b[32m[System] 📝 文件 ${cmd.path} 成功保存！\x1b[0m\r\n` })); if(!err) sendDirTree(sftpSession, cmd.dir); }); }
+                else if (cmd.type === 'CREATE_FILE' && sftpSession) { sftpSession.writeFile(cmd.path, '', 'utf8', (err) => { if (!err) { ws.send(JSON.stringify({ type: 'SYSTEM_MSG', data: `\r\n\x1b[32m[System] 📄 创建文件: ${cmd.path}\x1b[0m\r\n` })); sendDirTree(sftpSession, cmd.dir); } }); }
+                else if (cmd.type === 'CREATE_DIR' && sftpSession) { sftpSession.mkdir(cmd.path, (err) => { if (!err) { ws.send(JSON.stringify({ type: 'SYSTEM_MSG', data: `\r\n\x1b[32m[System] 📁 创建文件夹: ${cmd.path}\x1b[0m\r\n` })); sendDirTree(sftpSession, cmd.dir); } else ws.send(JSON.stringify({ type: 'SYSTEM_MSG', data: `\r\n\x1b[31m[System] 创建失败: ${err.message}\x1b[0m\r\n` })); }); }
+                else if (cmd.type === 'DELETE_NODE' && sftpSession) { if (cmd.isDir) { sftpSession.rmdir(cmd.path, (err) => { if(!err) { ws.send(JSON.stringify({ type: 'SYSTEM_MSG', data: `\r\n\x1b[32m[System] 🗑️ 删除文件夹: ${cmd.path}\x1b[0m\r\n` })); sendDirTree(sftpSession, cmd.dir); } else ws.send(JSON.stringify({ type: 'SYSTEM_MSG', data: `\r\n\x1b[31m[System] 删除失败 (可能非空): ${err.message}\x1b[0m\r\n` })); }); } else { sftpSession.unlink(cmd.path, (err) => { if(!err) { ws.send(JSON.stringify({ type: 'SYSTEM_MSG', data: `\r\n\x1b[32m[System] 🗑️ 删除文件: ${cmd.path}\x1b[0m\r\n` })); sendDirTree(sftpSession, cmd.dir); } }); } }
+                else if (cmd.type === 'RENAME_NODE' && sftpSession) { sftpSession.rename(cmd.oldPath, cmd.newPath, (err) => { if(!err) { ws.send(JSON.stringify({ type: 'SYSTEM_MSG', data: `\r\n\x1b[32m[System] ✏️ 重命名成功\x1b[0m\r\n` })); sendDirTree(sftpSession, cmd.dir); } }); }
+                else if (cmd.type === 'REFRESH_DIR' && sftpSession) sendDirTree(sftpSession, cmd.path || '/root');
             } catch(e) { if (sshStream) sshStream.write(message); }
         }
     });
@@ -210,4 +205,4 @@ wss.on('connection', (ws, req) => {
 });
 
 const PORT = process.env.PORT || 8080;
-server.listen(PORT, '0.0.0.0', () => console.log(`[Running] WebOS 终极云盘与广播版已点火，端口: ${PORT}`));
+server.listen(PORT, '0.0.0.0', () => console.log(`[Running] WebOS 全盘统御版已点火，端口: ${PORT}`));
