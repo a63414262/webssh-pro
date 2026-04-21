@@ -117,8 +117,6 @@
         
         .auth-btn { cursor: pointer; border: 1px solid var(--border); padding: 4px 10px; border-radius: 4px; transition: 0.3s; font-size: 12px; background: #141c16; }
         .auth-btn:hover { border-color: var(--accent); color: var(--accent); }
-
-        /* 【核心新增】：哈希工具链接样式 */
         .hash-link { font-size: 12px; color: #888; text-align: center; cursor: pointer; transition: 0.3s; text-decoration: underline; margin-top: 5px;}
         .hash-link:hover { color: var(--accent); }
     </style>
@@ -148,9 +146,7 @@
                 为了绝对安全，系统不保存明文密码。请在此输入你想设置的密码，生成后将其复制到云平台的 <b>PANEL_PASS_HASH</b> 环境变量中。<br>
                 <span style="color:#ff4d4f;">* 此过程完全在您的浏览器离线计算，绝不联网，请放心使用。</span>
             </div>
-            
             <input type="text" id="rawPassword" placeholder="输入你想要的明文密码" oninput="generateLocalHash()">
-            
             <div style="position: relative;">
                 <input type="text" id="hashResult" placeholder="这里将自动生成 64 位 SHA-256 哈希值" readonly style="width: 100%; box-sizing: border-box; padding-right: 80px; color: var(--accent); background: #000;">
                 <button onclick="copyHash()" style="position: absolute; right: 5px; top: 5px; padding: 6px 12px; font-size: 12px;">复制</button>
@@ -302,59 +298,17 @@
         editor.setValue("// 建立连接并在左侧【双击】文件，以在此处加载远端文件流...\n// 🚀 将本地文件直接拖拽到下方 Terminal 终端窗口内，即可触发极速上传！", -1);
         editor.commands.addCommand({ name: 'saveFile', bindKey: {win: "Ctrl-S", mac: "Command-S"}, exec: function() { saveCurrentFile(); } });
 
-        // ================= 【核心新增】：纯前端一键 Hash 生成逻辑 =================
-        window.openHashTool = function() {
-            showOverlay('hashToolOverlay');
-            document.getElementById('rawPassword').value = '';
-            document.getElementById('hashResult').value = '';
-        };
-
-        window.generateLocalHash = async function() {
-            const pwd = document.getElementById('rawPassword').value;
-            if (!pwd) { document.getElementById('hashResult').value = ''; return; }
-            
-            // 使用浏览器原生的 Web Crypto API，绝对离线安全
-            const msgBuffer = new TextEncoder().encode(pwd);
-            const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
-            const hashArray = Array.from(new Uint8Array(hashBuffer));
-            const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-            
-            document.getElementById('hashResult').value = hashHex;
-        };
-
-        window.copyHash = function() {
-            const hashInput = document.getElementById('hashResult');
-            if (!hashInput.value) return;
-            hashInput.select();
-            document.execCommand('copy');
-            const btn = event.target;
-            btn.innerText = '已复制!';
-            btn.style.background = 'var(--accent)';
-            btn.style.color = '#000';
-            setTimeout(() => { btn.innerText = '复制'; btn.style.background = ''; btn.style.color = ''; }, 2000);
-        };
-        // =====================================================================
+        window.openHashTool = function() { showOverlay('hashToolOverlay'); document.getElementById('rawPassword').value = ''; document.getElementById('hashResult').value = ''; };
+        window.generateLocalHash = async function() { const pwd = document.getElementById('rawPassword').value; if (!pwd) { document.getElementById('hashResult').value = ''; return; } const msgBuffer = new TextEncoder().encode(pwd); const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer); const hashArray = Array.from(new Uint8Array(hashBuffer)); const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join(''); document.getElementById('hashResult').value = hashHex; };
+        window.copyHash = function() { const hashInput = document.getElementById('hashResult'); if (!hashInput.value) return; hashInput.select(); document.execCommand('copy'); const btn = event.target; btn.innerText = '已复制!'; btn.style.background = 'var(--accent)'; btn.style.color = '#000'; setTimeout(() => { btn.innerText = '复制'; btn.style.background = ''; btn.style.color = ''; }, 2000); };
 
         window.switchTab = function(tab) {
             document.querySelectorAll('.editor-tab').forEach(el => el.classList.remove('active'));
-            if (tab === 'editor') {
-                document.getElementById('tabEditor').classList.add('active');
-                document.getElementById('editorAreaContainer').style.display = 'block'; document.getElementById('commandsAreaContainer').style.display = 'none';
-                document.getElementById('saveIndicator').style.display = 'block'; document.getElementById('addCmdIndicator').style.display = 'none';
-            } else {
-                document.getElementById('tabCommands').classList.add('active');
-                document.getElementById('editorAreaContainer').style.display = 'none'; document.getElementById('commandsAreaContainer').style.display = 'block';
-                document.getElementById('saveIndicator').style.display = 'none'; document.getElementById('addCmdIndicator').style.display = 'block';
-                if(!isGuest && globalWs && globalWs.readyState === WebSocket.OPEN) { globalWs.send(JSON.stringify({ type: 'GET_COMMANDS' })); } else { renderSavedCommands(); }
-            }
+            if (tab === 'editor') { document.getElementById('tabEditor').classList.add('active'); document.getElementById('editorAreaContainer').style.display = 'block'; document.getElementById('commandsAreaContainer').style.display = 'none'; document.getElementById('saveIndicator').style.display = 'block'; document.getElementById('addCmdIndicator').style.display = 'none'; } 
+            else { document.getElementById('tabCommands').classList.add('active'); document.getElementById('editorAreaContainer').style.display = 'none'; document.getElementById('commandsAreaContainer').style.display = 'block'; document.getElementById('saveIndicator').style.display = 'none'; document.getElementById('addCmdIndicator').style.display = 'block'; if(!isGuest && globalWs && globalWs.readyState === WebSocket.OPEN) { globalWs.send(JSON.stringify({ type: 'GET_COMMANDS' })); } else { renderSavedCommands(); } }
         };
 
-        window.createCommand = function() {
-            if (isGuest) return alert('访客模式无法保存命令，请先登录面板！');
-            const name = prompt('请输入命令名称 (如: 系统更新):'); if (!name || !name.trim()) return;
-            const cmd = prompt('请输入你要保存的完整 Shell 命令代码:'); if (!cmd || !cmd.trim()) return;
-            if (globalWs && globalWs.readyState === WebSocket.OPEN) globalWs.send(JSON.stringify({ type: 'SAVE_COMMAND', command: { id: 'cmd_' + Date.now(), name: name.trim(), cmd: cmd.trim() } }));
-        };
+        window.createCommand = function() { if (isGuest) return alert('访客模式无法保存命令，请先登录面板！'); const name = prompt('请输入命令名称 (如: 系统更新):'); if (!name || !name.trim()) return; const cmd = prompt('请输入你要保存的完整 Shell 命令代码:'); if (!cmd || !cmd.trim()) return; if (globalWs && globalWs.readyState === WebSocket.OPEN) globalWs.send(JSON.stringify({ type: 'SAVE_COMMAND', command: { id: 'cmd_' + Date.now(), name: name.trim(), cmd: cmd.trim() } })); };
         window.deleteCommand = function(id, e) { e.stopPropagation(); if(confirm('确定要永久删除这条常用命令吗？')) { if (globalWs && globalWs.readyState === WebSocket.OPEN) globalWs.send(JSON.stringify({ type: 'DELETE_COMMAND', id })); } };
         window.runCommand = function(id) { const command = savedCommandsCache.find(c => c.id === id); if (!command) return; if (!activeId || !sessions[activeId] || !sessions[activeId].ws) return alert('请先在左侧选择一个活跃节点'); sessions[activeId].ws.send(JSON.stringify({ type: 'TERMINAL_INPUT', data: command.cmd + '\r' })); };
 
@@ -416,7 +370,7 @@
                     renderSavedNodes(packet.nodes); renderSavedCommands(packet.commands);
                 } else if (packet.type === 'LOGIN_FAIL') { 
                     localStorage.removeItem('panelUser'); localStorage.removeItem('panelPass'); 
-                    if (packet.msg.includes('诊断报错')) alert(packet.msg); // 【弹出精准诊断信息】
+                    if (packet.msg.includes('诊断报错')) alert(packet.msg); 
                     showOverlay('panelAuthOverlay'); 
                 } 
                 else if (packet.type === 'SAVED_NODES_LIST') renderSavedNodes(packet.nodes);
@@ -427,10 +381,33 @@
         
         window.doPanelLogin = function() { const u = document.getElementById('panelUser').value.trim(); const p = document.getElementById('panelPass').value; localStorage.setItem('panelUser', u); localStorage.setItem('panelPass', p); if(globalWs && globalWs.readyState === WebSocket.OPEN) globalWs.send(JSON.stringify({ type: 'PANEL_LOGIN', user: u, pass: p })); else initGlobalWs(); };
 
+        // ================= 【核心新增】：延时防抖双击重命名引擎 =================
+        let nodeClickTimer = null;
+        
+        window.handleNodeClick = function(id) {
+            if (nodeClickTimer) clearTimeout(nodeClickTimer);
+            nodeClickTimer = setTimeout(() => { connectSavedNode(id); }, 250);
+        };
+
+        window.renameSavedNode = function(id, e) {
+            e.preventDefault(); e.stopPropagation();
+            if (nodeClickTimer) { clearTimeout(nodeClickTimer); nodeClickTimer = null; } // 瞬间切断连接动作
+            
+            const node = savedNodesCache.find(n => n.id === id);
+            if(!node) return;
+            const newAlias = prompt('✏️ 请输入该节点的自定义别名 (留空则恢复显示IP)：', node.alias || node.host);
+            if (newAlias !== null && globalWs && globalWs.readyState === WebSocket.OPEN) {
+                globalWs.send(JSON.stringify({ type: 'RENAME_SAVED_NODE', id, alias: newAlias.trim() }));
+            }
+        };
+
         function renderSavedNodes(nodes) {
             savedNodesCache = nodes || []; const container = document.getElementById('savedNodeList');
             if (savedNodesCache.length === 0) { container.innerHTML = '<div style="padding: 10px; text-align: center; color: #666; font-size: 12px;">保险箱为空</div>'; return; }
-            container.innerHTML = savedNodesCache.map(n => `<div class="server-item" style="color:#dcb67a;"><span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; padding-right: 10px;" title="${n.host}" onclick="connectSavedNode('${n.id}')">⚡ ${n.host}</span><span class="close-btn" title="从保险箱删除" onclick="deleteSavedNode('${n.id}', event)">✖</span></div>`).join('');
+            container.innerHTML = savedNodesCache.map(n => `<div class="server-item" style="color:#dcb67a;">
+                <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; padding-right: 10px; cursor: pointer; user-select: none;" title="双击重命名 | ${n.host}" onclick="handleNodeClick('${n.id}')" ondblclick="renameSavedNode('${n.id}', event)">⚡ ${n.alias ? n.alias : n.host}</span>
+                <span class="close-btn" title="从保险箱删除" onclick="deleteSavedNode('${n.id}', event)">✖</span>
+            </div>`).join('');
         }
 
         window.deleteSavedNode = function(id, e) { e.stopPropagation(); if(confirm('确定要从保险箱中永久删除此节点凭证吗？')) { if(globalWs && globalWs.readyState === WebSocket.OPEN) globalWs.send(JSON.stringify({ type: 'DELETE_SAVED_NODE', id })); } };
