@@ -11,16 +11,14 @@ RUN apk add --no-cache wget curl tar \
     && wget https://github.com/ViRb3/wgcf/releases/download/v2.2.22/wgcf_2.2.22_linux_amd64 -O /usr/local/bin/wgcf \
     && chmod +x /usr/local/bin/wgcf
 
-# 安装应用依赖
+# 安装依赖
 COPY package*.json ./
 RUN npm install --production
-RUN npm install socks
 
-# 拷贝所有源代码
+# 拷贝所有代码
 COPY . .
 
-# 暴露 8080 端口
 EXPOSE 8080
 
-# 启动核心引擎
+# 点火
 CMD [ "node", "server.js" ]
