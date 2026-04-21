@@ -1,12 +1,15 @@
-# 🚀 WebSSH Pro | Master OS 集群终极版
+
+# 🚀 WebSSH Pro | Master OS 集群终极堡垒机
 
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
-![Version](https://img.shields.io/badge/version-6.0.0%20Ultimate-green.svg)
+![Version](https://img.shields.io/badge/version-7.0.0%20Ultimate-green.svg)
+![Security](https://img.shields.io/badge/security-AES--256--GCM-red.svg)
 ![Docker](https://img.shields.io/badge/docker-ready-brightgreen.svg)
 
-**WebSSH Pro** 是一个基于 Node.js 的全栈 Serverless WebSSH 客户端与服务器集群管理面板。它打破了传统 Web 终端的极限，将你的浏览器变成一个强大的**迷你云端操作系统与私有云堡垒机**。
+**WebSSH Pro** 是一个基于 Node.js 的全栈 Serverless 跨平台 WebSSH 客户端与服务器集群管理面板。
+它打破了传统 Web 终端的极限，将你的浏览器彻底改造为一个强大的**迷你云端操作系统**与**零信任安全堡垒机**。
 
-内置全局鉴权、云端节点保险箱、全自动 WARP IPv6 穿透、Fail2Ban 防爆破、全盘漫游云盘、黑洞拖拽秒传、上帝广播模式与电竞级实时态势感知。专为极客与批量管理多台 VPS 打造的终极运维神器。
+内置全局哈希鉴权、内存级 JIT AES-256 加密保险箱、全自动 WARP IPv6 穿透、Fail2Ban 绝对防御、全盘漫游云盘、黑洞拖拽秒传、云端弹药库（常用命令保存）与上帝广播模式。专为极客与批量管理多台 VPS 打造的终极运维神器。
 
 📺 **作者 YouTube 频道**: [小K分享](https://www.youtube.com/@%E5%B0%8FK%E5%88%86%E4%BA%AB)
 
@@ -14,50 +17,45 @@
 
 ## ✨ 核心黑科技 (Features)
 
-### 🔐 零信任鉴权与云端保险箱 (Zero-Trust & Cloud Safe)
-- **全局面板鉴权**：通过环境变量注入账号密码，拦截一切非法访问。
-- **云端节点保险箱**：管理员登录后，可将常用 VPS 凭证（密码/私钥）高强度加密保存在容器云端，下次访问**一键秒连**。
-- **无痕访客模式 (Guest Mode)**：不登录也可免密进入访客体验模式。连接凭证仅存在于浏览器内存中，阅后即焚，绝对安全，且无法触碰云端保险箱。
+### 🔐 零知识绝对领域 (Zero-Knowledge Security)
+- **哈希鉴权隔离**：环境变量中**绝对不存储明文密码**，仅存储密码的 SHA-256 哈希值，即使平台漏洞导致配置泄露，黑客也无法逆向出真实密码。
+- **JIT 内存级加密**：输入的面板密码将在 WebSocket 内存中动态转化为 32 字节 AES-256-GCM 密钥。你的节点凭证与常用命令落地存储时全部为极高强度的密文，断开连接密钥即刻销毁 (GC)，实现真正的“拔网线即物理断绝”。
+- **双模运行 (Admin / Guest)**：不输入密码默认进入「无痕访客模式」，所有凭证阅后即焚，不留任何痕迹；登录后解锁「云端保险箱」，享受极客专属存储。
 
-### 🛡️ 内存级 Fail2Ban 防爆破 (绝对防御)
-- **前置拦截**：安全防线前置到 Web 路由层。当识别到同一公网 IP 连续输错 5 次 SSH 密码/私钥，系统会将其打入内存黑洞，物理封禁 24 小时。
-- **无损防御**：被封禁的 IP 发起的任何后续请求会被瞬间掐断 (Drop)，绝不消耗底层服务器的 SSH 握手资源。
+### ⚡ 云端弹药库与上帝广播 (Cloud Arsenal & God Mode)
+- **常用命令保险箱**：新增双选项卡切换。你可以将冗长的环境配置脚本（如换内核、装面板等）加密保存至云端，一键点击 `▶ 运行`，瞬间触发。
+- **上帝广播模式 (Multi-Execution)**：顶部专属全局命令框，敲击一次回车，命令将同步分发执行到所有已连接的在线集群节点，实现降维打击般的批量管理。
 
-### 🌐 全自动 WARP IPv6 智能穿透
-- **零配置点火**：容器启动即全自动向 Cloudflare 申请免费的 WARP 节点，并建立底层的 SOCKS5 隐形隧道 (`wireproxy`)。
-- **智能劫持**：登录纯 IPv6 小鸡时（如 Scaleway / Hax），系统自动识别冒号并劫持流量穿越 WARP 隧道，完美拯救各类无 IPv6 网络的纯净 Serverless 容器！
+### 🛡️ 内存级 Fail2Ban 防爆破 (Active Defense)
+- **前置拦截**：安全防线前置到 Web 路由层。同一公网 IP 连续 5 次 SSH 或面板鉴权失败，直接打入内存黑洞，物理封禁 24 小时。
+- **无损防御**：被封禁的 IP 发起的任何后续请求会被瞬间掐断 (Drop)，绝不消耗底层服务器的任何 SSH 握手资源。
 
-### ⚡ 上帝广播与黑洞秒传 (Terminal Evolution)
-- **上帝广播模式 (Multi-Execution)**：顶部专属全局命令框，敲击一次回车，命令将同步分发到所有已连接的集群节点，批量管理神器。
-- **黑洞拖拽秒传**：摒弃传统 Zmodem (rz/sz) 断流的烦恼，**直接将本地文件拖入黑色的 Terminal 窗口**，文件瞬间转化为 Base64 流直穿 SFTP 极速写入远端机器。
+### 📁 全盘漫游与黑洞秒传 (Advanced SFTP)
+- **全盘动态下钻**：突破 `/root` 限制，支持双击文件夹无缝下钻，支持退回根目录 `/`，实现真正的 Linux 全盘漫游。
+- **黑洞拖拽秒传**：摒弃传统 Zmodem (rz/sz) 断流的烦恼，**直接将本地文件拖入黑色的 Terminal 窗口**，文件瞬间转化为 Base64 流直穿 SFTP 极速写入当前所处目录。
+- **云端秒解压**：右键/悬停支持一键 **⏬ 本地下载**，以及对 `.zip / .tar.gz` 的 **📦 云端服务器原地爆破解压**。
+- **Ace Editor 云编**：双击文件拉取代码，支持数十种语法高亮，`Ctrl+S` 热键劫持直连物理机覆盖保存。
 
-### 📁 全盘漫游可视化云盘 (Advanced SFTP Manager)
-- **动态路径下钻**：突破 `/root` 限制，支持双击文件夹无缝下钻，支持退回根目录 `/`，实现真正的全盘文件漫游。
-- **云端原生操作**：新建、删除、重命名、上传全面适配当前绝对路径。
-- **Ace Editor 云端直编**：双击文件拉取代码，支持数十种语法高亮，`Ctrl+S` 热键劫持直连物理机保存。
-- **云端秒解压**：右键/悬停支持一键 **⏬ 本地下载**，以及对 `.zip / .tar.gz` 的 **📦 云端原地秒解压**。
-
-### 📊 电竞级实时态势感知 (Live Dashboard)
-- **三擎表盘**：实时独立监控 CPU、物理内存 (RAM) 与 **虚拟内存 (SWAP)**，OOM 危机一目了然。
-- **硬核数据盘**：精准显示系统运行时间 (Uptime)、系统负载 (Load)、以及分离的入站 (RX) / 出站 (TX) 实时网速。
-- **心跳调度器 (Task Manager)**：右下角常驻 Top 5 活跃进程。一键展开全屏快照，支持纯前端无缝排序，数据每 2 秒极致刷新。
+### 🌐 WARP IPv6 穿透 & 电竞级态势感知
+- **零配置点火**：容器启动即全自动向 Cloudflare 申请 WARP 节点，并建立底层的 SOCKS5 隐形隧道，完美拯救各类无 IPv6 网络的纯净 Serverless 容器！
+- **三擎表盘 & 进程调度**：实时独立监控 CPU、RAM 与 **SWAP (虚拟内存)**。支持纯前端无缝排序的 Top 100 进程实时快照，数据每 2 秒极致刷新。
 
 ---
 
 ## 🛠️ 技术栈 (Tech Stack)
 
-- **Backend**: Express, ws (WebSocket), ssh2 (纯 JS 协议栈), socks (代理劫持)
+- **Backend**: Express, ws (WebSocket), ssh2 (纯 JS 协议栈), crypto (原生密码学模块)
 - **Frontend**: 原生 JS/CSS, xterm.js, ECharts, Ace Editor
-- **Environment**: Node.js 18, wgcf (WARP 全自动注册), wireproxy (用户态 WireGuard 引擎)
+- **Environment**: Node.js 18+, wgcf (WARP 全自动注册), wireproxy (轻量级 WireGuard 引擎)
 
 ---
 
 ## 🚀 极速部署 (Docker / Serverless)
 
-本项目已完美适配 ClawCloud、Sealos 等 Serverless 容器平台，一键起飞。
+本项目已完美适配 ClawCloud、Sealos、Koyeb 等 Serverless 容器平台，一键起飞。
 
 ### 1. 镜像地址
-使用 GitHub Container Registry 提供的最新自动构建镜像：
+推荐直接使用 GitHub Container Registry 提供的最新镜像：
 ```text
 ghcr.io/a63414262/webssh-pro:latest
 ````
@@ -65,30 +63,33 @@ ghcr.io/a63414262/webssh-pro:latest
 ### 2\. 容器基础配置要求
 
   - **CPU**: 0.2 Core \~ 0.5 Core
-  - **内存 (Memory)**: ⚠️ 至少需分配 `512MB` (低于此值可能导致 Node.js 内存溢出或 WARP 隧道断流)
+  - **内存 (Memory)**: ⚠️ 至少需分配 `512MB` (用于承载 AES-256 加密运算与底层的 WARP 网络引擎)
   - **暴露端口 (Port)**: `8080` (开启公网访问)
 
-### 3\. 环境变量 (Environment Variables)
+### 3\. 配置环境变量 (极其重要 ⚠️)
 
-在部署时，添加以下环境变量以解锁**云端保险箱**与**面板鉴权**功能（如果不填账号密码，则默认全局为无痕访客模式）：
+为了极致的安全，本系统**不接受明文密码**。你需要先计算出你想要的密码的 **SHA-256 哈希值**。
+
+**如何计算 Hash？**
+在任何 Linux/macOS 终端执行（替换 `你的复杂密码`）：
+
+```bash
+echo -n "你的复杂密码" | sha256sum
+```
+
+*(你也可以使用网上的在线 SHA-256 计算工具计算密码的 Hash 值)*
+
+**在云平台填入以下环境变量：**
 
 ```text
 TZ=Asia/Shanghai
 NODE_ENV=production
 PORT=8080
-PANEL_USER=你的自定义账号 (例如: admin)
-PANEL_PASS=你的自定义密码 (例如: 123456)
+PANEL_USER=admin                         # 你的自定义面板账号
+PANEL_PASS_HASH=8d969eef6ecad3c29a3a...  # 刚才算出来的 64 位 Hash 密文
 ```
 
-*(注：系统会在容器启动时全自动注册并拉起 WARP 隧道，无需手动配置任何节点私钥！)*
-
------
-
-## 🔒 隐私与安全声明 (Privacy & Security)
-
-1.  **去中心化存储**：本系统不依赖任何外部数据库（MySQL/Redis）。在无痕访客模式下，所有节点连接凭证仅存在于浏览器的临时内存中，刷新瞬间销毁。
-2.  **本地保险箱**：面板认证通过后保存的节点数据，仅加密存储在容器本地的 `nodes.json` 中，绝不上传至任何第三方服务器。
-3.  **建议**：在生产环境中部署时，请务必绑定自定义域名并开启 HTTPS (SSL) 加密，以保护 WebSocket 数据隧道的绝对传输安全。
+*(注：如果完全不填写 `PANEL_USER` 和 `PANEL_PASS_HASH`，系统将默认锁定为无痕访客模式)*
 
 -----
 
