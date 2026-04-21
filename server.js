@@ -16,14 +16,12 @@ const wss = new WebSocket.Server({ server });
 // ================= 【云端保险箱与面板鉴权配置】 =================
 const PANEL_USER = (process.env.PANEL_USER || '').trim();
 const PANEL_PASS_HASH = (process.env.PANEL_PASS_HASH || '').split(/\s+/)[0].trim().toLowerCase();
-
-// 【核心新增】：站长免死金牌（IP 白名单），支持英文逗号分隔多个 IP
 const PANEL_IP_WHITELIST = (process.env.PANEL_IP_WHITELIST || '').split(',').map(ip => ip.trim()).filter(Boolean);
 
 const NODES_FILE = '/usr/src/app/nodes.json'; 
 const COMMANDS_FILE = '/usr/src/app/commands.json'; 
 
-// ================= 【JIT 军事级加解密引擎】 =================
+// ================= 【JIT 军事级加解密引擎 (密钥不落地)】 =================
 const encryptData = (data, dynamicKey) => {
     if (!dynamicKey) return JSON.stringify(data); 
     try {
@@ -80,11 +78,8 @@ const BLOCK_TIME = 24 * 60 * 60 * 1000;
 
 wss.on('connection', (ws, req) => {
     const clientIp = req.headers['x-forwarded-for'] ? req.headers['x-forwarded-for'].split(',')[0].trim() : req.socket.remoteAddress;
-    
-    // 【核心新增】：判断当前 IP 是否享有豁免特权
     const isWhiteIp = PANEL_IP_WHITELIST.includes(clientIp);
 
-    // 如果不是白名单IP，且在黑名单里，直接踢掉
     if (!isWhiteIp && ipBlocklist.has(clientIp)) {
         if (Date.now() < ipBlocklist.get(clientIp)) {
             ws.send(JSON.stringify({ type: 'TERMINAL', data: `\r\n\x1b[1;41;37m [ 绝对防御 ] \x1b[0m\x1b[31m IP (${clientIp}) 因爆破已被物理隔离 24 小时！\x1b[0m\r\n` }));
@@ -109,7 +104,6 @@ wss.on('connection', (ws, req) => {
         try {
             const cmd = JSON.parse(message);
 
-            // ================= 【零知识面板鉴权】 =================
             if (cmd.type === 'PANEL_LOGIN') {
                 const inputHash = cmd.pass ? crypto.createHash('sha256').update(cmd.pass).digest('hex').toLowerCase() : '';
                 const isMatch = (PANEL_USER === '' && PANEL_PASS_HASH === '') || (cmd.user === PANEL_USER && inputHash === PANEL_PASS_HASH);
@@ -119,17 +113,18 @@ wss.on('connection', (ws, req) => {
                     ws.aesKey = cmd.pass ? crypto.createHash('sha256').update(cmd.pass).digest() : null;
                     ws.send(JSON.stringify({ type: 'LOGIN_SUCCESS', nodes: getSavedNodes(ws.aesKey), commands: getSavedCommands(ws.aesKey) }));
                 } else {
-                    // 【核心修改】：只有非白名单 IP 输错密码才会被记账封禁
                     if (!isWhiteIp && (cmd.user !== '' || cmd.pass !== '')) {
                         let attempts = (ipAttempts.get(clientIp) || 0) + 1; ipAttempts.set(clientIp, attempts);
                         if (attempts >= MAX_ATTEMPTS) { ipBlocklist.set(clientIp, Date.now() + BLOCK_TIME); }
                     }
-                    ws.send(JSON.stringify({ type: 'LOGIN_FAIL', msg: '面板用户名或密码错误！' }));
+                    ws.send(JSON.stringify({ type: 'LOGIN_FAIL', msg: `【诊断报错：登录失败】\n可能是账号或密码(Hash)不匹配！\n服务器读到的环境变量面板用户为：[${PANEL_USER}]\n(如果显示为空，说明环境变量没生效，请重启容器)` }));
                 }
                 return;
             }
 
-            if (cmd.type === 'GET_NODES' || cmd.type === 'SAVE_NODE' || cmd.type === 'DELETE_SAVED_NODE' || cmd.type === 'GET_COMMANDS' || cmd.type === 'SAVE_COMMAND' || cmd.type === 'DELETE_COMMAND') {
+            // ================= 【云端双保险箱操作 (需权限)】 =================
+            // 【核心新增】：加入了 RENAME_SAVED_NODE 路由
+            if (cmd.type === 'GET_NODES' || cmd.type === 'SAVE_NODE' || cmd.type === 'DELETE_SAVED_NODE' || cmd.type === 'RENAME_SAVED_NODE' || cmd.type === 'GET_COMMANDS' || cmd.type === 'SAVE_COMMAND' || cmd.type === 'DELETE_COMMAND') {
                 if (!ws.isAuthenticated) return;
                 
                 if (cmd.type === 'GET_NODES') ws.send(JSON.stringify({ type: 'SAVED_NODES_LIST', nodes: getSavedNodes(ws.aesKey) }));
@@ -141,6 +136,11 @@ wss.on('connection', (ws, req) => {
                 else if (cmd.type === 'DELETE_SAVED_NODE') {
                     let nodes = getSavedNodes(ws.aesKey); nodes = nodes.filter(n => n.id !== cmd.id);
                     saveNodesData(nodes, ws.aesKey); ws.send(JSON.stringify({ type: 'SAVED_NODES_LIST', nodes: getSavedNodes(ws.aesKey) }));
+                }
+                else if (cmd.type === 'RENAME_SAVED_NODE') {
+                    let nodes = getSavedNodes(ws.aesKey); let idx = nodes.findIndex(n => n.id === cmd.id);
+                    if (idx >= 0) { nodes[idx].alias = cmd.alias; saveNodesData(nodes, ws.aesKey); }
+                    ws.send(JSON.stringify({ type: 'SAVED_NODES_LIST', nodes: getSavedNodes(ws.aesKey) }));
                 }
                 else if (cmd.type === 'GET_COMMANDS') ws.send(JSON.stringify({ type: 'SAVED_COMMANDS_LIST', commands: getSavedCommands(ws.aesKey) }));
                 else if (cmd.type === 'SAVE_COMMAND') {
@@ -155,6 +155,7 @@ wss.on('connection', (ws, req) => {
                 return;
             }
 
+            // ================= 【无痕 SSH 直连通道 (无需面板鉴权)】 =================
             if (cmd.host) {
                 if (sshStream) return;
                 const creds = cmd; creds.tryKeyboard = true; creds.readyTimeout = 20000;
@@ -193,7 +194,6 @@ wss.on('connection', (ws, req) => {
                     if (prompts.length > 0 && prompts[0].prompt.toLowerCase().includes('password')) finish([creds.password]); else finish([]);
                 }).on('error', (err) => {
                     if (ws.readyState === WebSocket.OPEN) {
-                        // 【核心修改】：只有非白名单 IP 连错机器才会被记账封禁
                         if (!isWhiteIp && (err.message.toLowerCase().includes('authenticat') || err.message.includes('Handshake failed'))) {
                             let attempts = (ipAttempts.get(clientIp) || 0) + 1; ipAttempts.set(clientIp, attempts);
                             if (attempts >= MAX_ATTEMPTS) { ipBlocklist.set(clientIp, Date.now() + BLOCK_TIME); ws.send(JSON.stringify({ type: 'TERMINAL', data: `\r\n\x1b[1;41;37m [ 警报 ] \x1b[0m\x1b[31m IP 因爆破已被物理隔离！\x1b[0m\r\n` })); } 
@@ -211,6 +211,7 @@ wss.on('connection', (ws, req) => {
                 } else sshClient.connect(creds);
             }
             
+            // ================= 【终端广播与全盘漫游文件流】 =================
             if (cmd.type === 'TERMINAL_INPUT' && sshStream) sshStream.write(cmd.data);
             else if (cmd.type === 'UNZIP' && sshClient) {
                 const ext = cmd.path.toLowerCase(); let execCmd = '';
