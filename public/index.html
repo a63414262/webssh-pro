@@ -108,7 +108,7 @@
         .live-indicator { font-size: 12px; font-weight: normal; color: var(--accent); margin-left: 15px; animation: pulse-green 2s infinite; }
 
         .overlay-bg { position: absolute; inset: 0; background: rgba(0,0,0,0.85); backdrop-filter: blur(5px); display: none; justify-content: center; align-items: center; z-index: 999; opacity: 0; transition: opacity 0.3s; }
-        .login-box { background: #161e18; border: 1px solid var(--accent); padding: 30px; width: 400px; border-radius: 8px; box-shadow: 0 0 30px rgba(0,255,102,0.1); display: grid; gap: 15px; }
+        .login-box { background: #161e18; border: 1px solid var(--accent); padding: 30px; width: 400px; border-radius: 8px; box-shadow: 0 0 30px rgba(0,255,102,0.1); display: grid; gap: 15px; position: relative;}
         input, textarea { background: #0a120c; color: #fff; border: 1px solid #3c4c41; padding: 10px; border-radius: 4px; font-family: monospace; outline: none;}
         input:focus, textarea:focus { border-color: var(--accent); }
         textarea { height: 80px; resize: vertical; }
@@ -117,6 +117,10 @@
         
         .auth-btn { cursor: pointer; border: 1px solid var(--border); padding: 4px 10px; border-radius: 4px; transition: 0.3s; font-size: 12px; background: #141c16; }
         .auth-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+        /* 【核心新增】：哈希工具链接样式 */
+        .hash-link { font-size: 12px; color: #888; text-align: center; cursor: pointer; transition: 0.3s; text-decoration: underline; margin-top: 5px;}
+        .hash-link:hover { color: var(--accent); }
     </style>
 </head>
 <body>
@@ -130,6 +134,28 @@
                 <button onclick="skipLogin()" style="background: #2c3c31; color: #a0c2a8; flex: 1;">👤 访客体验</button>
                 <button onclick="doPanelLogin()" style="flex: 2;">🚀 解锁控制台</button>
             </div>
+            <div class="hash-link" onclick="openHashTool()">🔧 忘记怎么算 Hash 了？点我一键生成</div>
+        </div>
+    </div>
+
+    <div id="hashToolOverlay" class="overlay-bg" style="z-index: 1000;">
+        <div class="login-box" style="width: 450px;">
+            <h2 style="margin:0 0 10px 0; color:#fff; display:flex; justify-content:space-between;">
+                <span>🛠️ 本地 Hash 生成器</span>
+                <span style="cursor:pointer; color:#888; font-size:16px;" onclick="hideOverlay('hashToolOverlay')">✖</span>
+            </h2>
+            <div style="font-size: 12px; color: #a0c2a8; line-height: 1.5;">
+                为了绝对安全，系统不保存明文密码。请在此输入你想设置的密码，生成后将其复制到云平台的 <b>PANEL_PASS_HASH</b> 环境变量中。<br>
+                <span style="color:#ff4d4f;">* 此过程完全在您的浏览器离线计算，绝不联网，请放心使用。</span>
+            </div>
+            
+            <input type="text" id="rawPassword" placeholder="输入你想要的明文密码" oninput="generateLocalHash()">
+            
+            <div style="position: relative;">
+                <input type="text" id="hashResult" placeholder="这里将自动生成 64 位 SHA-256 哈希值" readonly style="width: 100%; box-sizing: border-box; padding-right: 80px; color: var(--accent); background: #000;">
+                <button onclick="copyHash()" style="position: absolute; right: 5px; top: 5px; padding: 6px 12px; font-size: 12px;">复制</button>
+            </div>
+            <button onclick="hideOverlay('hashToolOverlay')" style="background: #2c3c31; color: #fff;">返回登录</button>
         </div>
     </div>
 
@@ -276,6 +302,39 @@
         editor.setValue("// 建立连接并在左侧【双击】文件，以在此处加载远端文件流...\n// 🚀 将本地文件直接拖拽到下方 Terminal 终端窗口内，即可触发极速上传！", -1);
         editor.commands.addCommand({ name: 'saveFile', bindKey: {win: "Ctrl-S", mac: "Command-S"}, exec: function() { saveCurrentFile(); } });
 
+        // ================= 【核心新增】：纯前端一键 Hash 生成逻辑 =================
+        window.openHashTool = function() {
+            showOverlay('hashToolOverlay');
+            document.getElementById('rawPassword').value = '';
+            document.getElementById('hashResult').value = '';
+        };
+
+        window.generateLocalHash = async function() {
+            const pwd = document.getElementById('rawPassword').value;
+            if (!pwd) { document.getElementById('hashResult').value = ''; return; }
+            
+            // 使用浏览器原生的 Web Crypto API，绝对离线安全
+            const msgBuffer = new TextEncoder().encode(pwd);
+            const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
+            const hashArray = Array.from(new Uint8Array(hashBuffer));
+            const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+            
+            document.getElementById('hashResult').value = hashHex;
+        };
+
+        window.copyHash = function() {
+            const hashInput = document.getElementById('hashResult');
+            if (!hashInput.value) return;
+            hashInput.select();
+            document.execCommand('copy');
+            const btn = event.target;
+            btn.innerText = '已复制!';
+            btn.style.background = 'var(--accent)';
+            btn.style.color = '#000';
+            setTimeout(() => { btn.innerText = '复制'; btn.style.background = ''; btn.style.color = ''; }, 2000);
+        };
+        // =====================================================================
+
         window.switchTab = function(tab) {
             document.querySelectorAll('.editor-tab').forEach(el => el.classList.remove('active'));
             if (tab === 'editor') {
@@ -355,7 +414,11 @@
                     isGuest = false; hideOverlay('panelAuthOverlay');
                     document.getElementById('authStatusBtn').innerText = '🟢 已认证'; document.getElementById('authStatusBtn').style.borderColor = 'var(--accent)'; document.getElementById('authStatusBtn').style.color = 'var(--accent)';
                     renderSavedNodes(packet.nodes); renderSavedCommands(packet.commands);
-                } else if (packet.type === 'LOGIN_FAIL') { localStorage.removeItem('panelUser'); localStorage.removeItem('panelPass'); showOverlay('panelAuthOverlay'); } 
+                } else if (packet.type === 'LOGIN_FAIL') { 
+                    localStorage.removeItem('panelUser'); localStorage.removeItem('panelPass'); 
+                    if (packet.msg.includes('诊断报错')) alert(packet.msg); // 【弹出精准诊断信息】
+                    showOverlay('panelAuthOverlay'); 
+                } 
                 else if (packet.type === 'SAVED_NODES_LIST') renderSavedNodes(packet.nodes);
                 else if (packet.type === 'SAVED_COMMANDS_LIST') renderSavedCommands(packet.commands);
             };
@@ -422,7 +485,7 @@
                     sessions[id].filesHTML = html; if(sessions[id].selectedNode && !packet.files.some(f => f.name === sessions[id].selectedNode.name)) sessions[id].selectedNode = null; if(activeId === id) updateActiveUI();
                 }
                 else if (packet.type === 'DOWNLOAD_READY') { const link = document.createElement('a'); link.href = 'data:application/octet-stream;base64,' + packet.data; link.download = packet.filename; document.body.appendChild(link); link.click(); document.body.removeChild(link); document.getElementById('saveIndicator').innerText = '✔ Download Success'; setTimeout(() => { document.getElementById('saveIndicator').innerText = 'Save (Ctrl+S)'; document.getElementById('saveIndicator').style.color = '#fff'; }, 3000); }
-                else if (packet.type === 'FILE_CONTENT') { if (activeId === id) { document.getElementById('currentFileName').innerText = packet.filename; sessions[activeId].currentOpenFilePath = packet.path; editor.setValue(packet.content, -1); editor.session.setMode(`ace/mode/${{'js':'javascript','json':'json','html':'html','css':'css','sh':'sh','bash':'sh','py':'python','yaml':'yaml','yml':'yaml','conf':'ini','xml':'xml'}[packet.filename.split('.').pop().toLowerCase()] || 'text'}`); } }
+                else if (packet.type === 'FILE_CONTENT') { if (activeId === id) { document.getElementById('currentFileName').innerText = packet.filename; sessions[activeId].currentOpenFilePath = packet.path; document.getElementById('tabEditor').click(); editor.setValue(packet.content, -1); editor.session.setMode(`ace/mode/${{'js':'javascript','json':'json','html':'html','css':'css','sh':'sh','bash':'sh','py':'python','yaml':'yaml','yml':'yaml','conf':'ini','xml':'xml'}[packet.filename.split('.').pop().toLowerCase()] || 'text'}`); } }
                 else if (packet.type === 'FULL_PROCESS_LIST') { if (activeId === id) { sessions[id].fullProcessList = packet.list; renderFullProcessList(); } }
                 else if (packet.type === 'MONITOR') {
                     sessions[id].processes = packet.processes || []; sessions[id].rxSpeed = packet.rxSpeed; sessions[id].txSpeed = packet.txSpeed; sessions[id].uptime = packet.uptime; sessions[id].load = packet.load; sessions[id].swap = packet.swap;
