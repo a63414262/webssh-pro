@@ -1,7 +1,7 @@
 {
-  "name": "webssh-master-os",
-  "version": "4.0.0",
-  "description": "All-in-One WebOS with WARP IPv6 Support",
+  "name": "webssh-pro-master-os",
+  "version": "6.0.0",
+  "description": "Serverless WebSSH & Cluster Management OS",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
