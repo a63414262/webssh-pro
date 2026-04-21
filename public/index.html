@@ -110,10 +110,13 @@
     <div id="panelAuthOverlay" class="overlay-bg">
         <div class="login-box">
             <h2 style="margin:0 0 10px 0; color:#fff; text-align: center;">🔐 面板安全认证</h2>
-            <div style="font-size: 12px; color: #888; text-align: center; margin-top: -10px;">输入 ClawCloud 环境变量中配置的凭证</div>
+            <div style="font-size: 12px; color: #888; text-align: center; margin-top: -10px;">认证后可解锁云端保险箱功能</div>
             <input type="text" id="panelUser" placeholder="面板用户名 (PANEL_USER)">
             <input type="password" id="panelPass" placeholder="面板密码 (PANEL_PASS)">
-            <button onclick="doPanelLogin()">🚀 登录控制台</button>
+            <div style="display: flex; gap: 10px;">
+                <button onclick="skipLogin()" style="background: #2c3c31; color: #a0c2a8; flex: 1;">👤 访客体验</button>
+                <button onclick="doPanelLogin()" style="flex: 2;">🚀 登录控制台</button>
+            </div>
         </div>
     </div>
 
@@ -130,9 +133,11 @@
             <input type="text" id="user" placeholder="Username" value="root">
             <input type="password" id="pass" placeholder="Password (或私钥密码)">
             <textarea id="key" placeholder="在此粘贴私钥 (-----BEGIN OPENSSH PRIVATE KEY-----)&#10;留空则使用上方密码登录"></textarea>
-            <label style="color:#a0c2a8; font-size:13px; display:flex; align-items:center; cursor:pointer;">
+            
+            <label id="saveNodeArea" style="color:#a0c2a8; font-size:13px; display:flex; align-items:center; cursor:pointer;">
                 <input type="checkbox" id="saveNodeCheck" checked style="width: auto; margin-right: 8px; cursor:pointer;"> 💾 将此凭证安全存储至云端节点保险箱
             </label>
+            
             <button onclick="connectEngine()">⚡ 建立节点连接</button>
         </div>
     </div>
@@ -182,7 +187,7 @@
                 <div style="padding: 10px; text-align: center; color: #666; font-size: 12px;">未登录或无数据</div>
             </div>
 
-            <div class="panel-title"><span>🌐 活跃节点会话</span> <span class="add-btn" onclick="showOverlay('sshConnectOverlay')">+ 直连</span></div>
+            <div class="panel-title"><span>🌐 活跃节点会话</span> <span class="add-btn" onclick="openSshOverlay()">+ 直连</span></div>
             <div id="serverList"></div>
             
             <div class="panel-title" style="border-top: 1px solid var(--border);">
@@ -247,8 +252,9 @@
         let currentSortCol = 'cpu';
         let currentSortDir = 'desc';
         let processPollingInterval = null;
-        let globalWs = null; // 全局 WebSocket 鉴权通道
-        let savedNodesCache = []; // 本地缓存的已存节点
+        let globalWs = null; 
+        let savedNodesCache = []; 
+        let isGuest = true; // 【核心新增】：默认开启访客模式
 
         function joinPath(dir, file) { return dir.endsWith('/') ? dir + file : dir + '/' + file; }
         function getParentDir(dir) { if(dir === '/') return '/'; const parts = dir.split('/').filter(Boolean); parts.pop(); return '/' + parts.join('/'); }
@@ -347,30 +353,53 @@
             container.innerHTML = processes.map(p => `<div class="pt-row"><span class="pt-col-mem">${p.mem}</span><span class="pt-col-cpu">${p.cpu}</span><span class="pt-col-cmd">${p.cmd}</span></div>`).join('');
         }
 
-        // ================= 【核心新增】：全局面板登录鉴权系统 =================
         function showOverlay(id) { document.getElementById(id).style.display = 'flex'; setTimeout(() => document.getElementById(id).style.opacity = '1', 10); }
         function hideOverlay(id) { document.getElementById(id).style.opacity = '0'; setTimeout(() => document.getElementById(id).style.display = 'none', 300); }
+
+        // 【核心新增】：访客模式逻辑
+        window.skipLogin = function() {
+            isGuest = true;
+            hideOverlay('panelAuthOverlay');
+            document.getElementById('authStatusBtn').innerText = '👤 访客模式';
+            document.getElementById('authStatusBtn').style.borderColor = '#555';
+            document.getElementById('authStatusBtn').style.color = '#888';
+            document.getElementById('savedNodeList').innerHTML = '<div style="padding: 10px; text-align: center; color: #666; font-size: 12px;">访客模式 (无痕不保存)</div>';
+        };
+
+        window.openSshOverlay = function() {
+            if (isGuest) {
+                document.getElementById('saveNodeArea').style.opacity = '0.3';
+                document.getElementById('saveNodeCheck').disabled = true;
+                document.getElementById('saveNodeCheck').checked = false;
+                document.getElementById('saveNodeArea').title = '访客模式无法使用云端保险箱，请先登录面板';
+            } else {
+                document.getElementById('saveNodeArea').style.opacity = '1';
+                document.getElementById('saveNodeCheck').disabled = false;
+                document.getElementById('saveNodeCheck').checked = true;
+                document.getElementById('saveNodeArea').title = '';
+            }
+            showOverlay('sshConnectOverlay');
+        };
 
         function initGlobalWs() {
             if (globalWs) return;
             globalWs = new WebSocket((window.location.protocol === 'https:' ? 'wss://' : 'ws://') + window.location.host + '/');
             globalWs.onopen = () => {
-                const user = localStorage.getItem('panelUser'); const pass = localStorage.getItem('panelPass');
-                if (user && pass) {
-                    globalWs.send(JSON.stringify({ type: 'PANEL_LOGIN', user, pass }));
-                } else {
-                    showOverlay('panelAuthOverlay'); // 没存密码就弹窗
-                }
+                const user = localStorage.getItem('panelUser') || ''; const pass = localStorage.getItem('panelPass') || '';
+                // 默认直接探测一次，如果后端没设密码，直接绿灯放行
+                globalWs.send(JSON.stringify({ type: 'PANEL_LOGIN', user, pass }));
             };
             globalWs.onmessage = (e) => {
                 const packet = JSON.parse(e.data);
                 if (packet.type === 'LOGIN_SUCCESS') {
+                    isGuest = false;
                     hideOverlay('panelAuthOverlay');
                     document.getElementById('authStatusBtn').innerText = '🟢 已认证';
                     document.getElementById('authStatusBtn').style.borderColor = 'var(--accent)';
+                    document.getElementById('authStatusBtn').style.color = 'var(--accent)';
                     renderSavedNodes(packet.nodes);
                 } else if (packet.type === 'LOGIN_FAIL') {
-                    alert(packet.msg); localStorage.removeItem('panelUser'); localStorage.removeItem('panelPass');
+                    localStorage.removeItem('panelUser'); localStorage.removeItem('panelPass');
                     showOverlay('panelAuthOverlay');
                 } else if (packet.type === 'SAVED_NODES_LIST') {
                     renderSavedNodes(packet.nodes);
@@ -379,21 +408,16 @@
             globalWs.onclose = () => { globalWs = null; setTimeout(initGlobalWs, 3000); };
         }
         
-        function doPanelLogin() {
-            const u = document.getElementById('panelUser').value.trim();
-            const p = document.getElementById('panelPass').value;
+        window.doPanelLogin = function() {
+            const u = document.getElementById('panelUser').value.trim(); const p = document.getElementById('panelPass').value;
             localStorage.setItem('panelUser', u); localStorage.setItem('panelPass', p);
             if(globalWs && globalWs.readyState === WebSocket.OPEN) globalWs.send(JSON.stringify({ type: 'PANEL_LOGIN', user: u, pass: p }));
             else initGlobalWs();
-        }
+        };
 
         function renderSavedNodes(nodes) {
-            savedNodesCache = nodes || [];
-            const container = document.getElementById('savedNodeList');
-            if (savedNodesCache.length === 0) {
-                container.innerHTML = '<div style="padding: 10px; text-align: center; color: #666; font-size: 12px;">保险箱为空</div>';
-                return;
-            }
+            savedNodesCache = nodes || []; const container = document.getElementById('savedNodeList');
+            if (savedNodesCache.length === 0) { container.innerHTML = '<div style="padding: 10px; text-align: center; color: #666; font-size: 12px;">保险箱为空</div>'; return; }
             container.innerHTML = savedNodesCache.map(n => `
                 <div class="server-item" style="color:#dcb67a;">
                     <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; padding-right: 10px;" title="${n.host}" onclick="connectSavedNode('${n.id}')">⚡ ${n.host}</span>
@@ -402,27 +426,23 @@
             `).join('');
         }
 
-        function deleteSavedNode(id, e) {
+        window.deleteSavedNode = function(id, e) {
             e.stopPropagation();
             if(confirm('确定要从保险箱中永久删除此节点凭证吗？')) {
                 if(globalWs && globalWs.readyState === WebSocket.OPEN) globalWs.send(JSON.stringify({ type: 'DELETE_SAVED_NODE', id }));
             }
-        }
+        };
 
-        function connectSavedNode(id) {
+        window.connectSavedNode = function(id) {
             const node = savedNodesCache.find(n => n.id === id);
             if(node) {
-                document.getElementById('host').value = node.host;
-                document.getElementById('port').value = node.port;
-                document.getElementById('user').value = node.user;
-                document.getElementById('pass').value = node.password || '';
-                document.getElementById('key').value = node.privateKey || '';
+                document.getElementById('host').value = node.host; document.getElementById('port').value = node.port; document.getElementById('user').value = node.user;
+                document.getElementById('pass').value = node.password || ''; document.getElementById('key').value = node.privateKey || '';
                 document.getElementById('saveNodeCheck').checked = false; // 已保存的不需要再保存
                 connectEngine();
             }
-        }
+        };
 
-        // ================= 【终端连接流程】 =================
         function connectEngine() {
             const host = document.getElementById('host').value.trim(); const port = parseInt(document.getElementById('port').value) || 22; const user = document.getElementById('user').value.trim();
             if(!host) return; const id = `${user}@${host}:${port}`; if(sessions[id]) return alert('已存在连接！'); hideOverlay('sshConnectOverlay');
@@ -453,9 +473,8 @@
                 if (key) { creds.privateKey = key; if (pass) creds.passphrase = pass; } else { creds.password = pass; } 
                 ws.send(JSON.stringify(creds)); 
                 
-                // 【核心新增】：触发保存节点
                 const isSave = document.getElementById('saveNodeCheck').checked;
-                if(isSave && globalWs && globalWs.readyState === WebSocket.OPEN) {
+                if(isSave && !isGuest && globalWs && globalWs.readyState === WebSocket.OPEN) {
                     globalWs.send(JSON.stringify({ type: 'SAVE_NODE', node: creds }));
                 }
             };
@@ -511,7 +530,6 @@
         window.addEventListener('resize', () => { if(activeId && sessions[activeId]) sessions[activeId].fitAddon.fit(); });
         window.openFile = function(filename) { if(!activeId || !sessions[activeId] || !sessions[activeId].ws) return; const targetPath = joinPath(sessions[activeId].currentDir, filename); document.getElementById('currentFileName').innerText = filename; editor.setValue(`// 正在从节点拉取文件流: ${targetPath} \n// 🚀 Engine Requesting...`, -1); sessions[activeId].ws.send(JSON.stringify({ type: 'READ_FILE', path: targetPath })); };
 
-        // 页面启动时初始化安全鉴权通道
         window.onload = () => { initGlobalWs(); };
     </script>
 </body>
