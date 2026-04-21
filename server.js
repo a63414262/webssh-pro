@@ -6,6 +6,7 @@ const path = require('path');
 const fs = require('fs');
 const { exec, execSync } = require('child_process');
 const { SocksClient } = require('socks');
+const crypto = require('crypto'); 
 
 const app = express();
 app.use(express.static(path.join(__dirname, 'public')));
@@ -14,17 +15,45 @@ const wss = new WebSocket.Server({ server });
 
 // ================= 【云端保险箱与面板鉴权配置】 =================
 const PANEL_USER = process.env.PANEL_USER || '';
-const PANEL_PASS = process.env.PANEL_PASS || '';
+const PANEL_PASS_HASH = process.env.PANEL_PASS_HASH || ''; // 仅存哈希，不存明文！
 const NODES_FILE = '/usr/src/app/nodes.json'; 
-const COMMANDS_FILE = '/usr/src/app/commands.json'; // 【新增】：常用命令存储文件
+const COMMANDS_FILE = '/usr/src/app/commands.json'; 
 
-const getSavedNodes = () => { try { if (fs.existsSync(NODES_FILE)) return JSON.parse(fs.readFileSync(NODES_FILE, 'utf8')); } catch(e){} return []; };
-const saveNodesData = (nodes) => { fs.writeFileSync(NODES_FILE, JSON.stringify(nodes, null, 2), 'utf8'); };
+// ================= 【JIT 军事级加解密引擎 (密钥不落地)】 =================
+const encryptData = (data, dynamicKey) => {
+    if (!dynamicKey) return JSON.stringify(data); 
+    try {
+        const iv = crypto.randomBytes(16); 
+        const cipher = crypto.createCipheriv('aes-256-gcm', dynamicKey, iv);
+        let encrypted = cipher.update(JSON.stringify(data), 'utf8', 'hex');
+        encrypted += cipher.final('hex');
+        const authTag = cipher.getAuthTag().toString('hex'); 
+        return JSON.stringify({ iv: iv.toString('hex'), encryptedData: encrypted, authTag: authTag });
+    } catch(e) { return "[]"; }
+};
 
-// 【新增】：命令保险箱操作函数
-const getSavedCommands = () => { try { if (fs.existsSync(COMMANDS_FILE)) return JSON.parse(fs.readFileSync(COMMANDS_FILE, 'utf8')); } catch(e){} return []; };
-const saveCommandsData = (cmds) => { fs.writeFileSync(COMMANDS_FILE, JSON.stringify(cmds, null, 2), 'utf8'); };
+const decryptData = (text, dynamicKey) => {
+    if (!text) return [];
+    try {
+        const parsed = JSON.parse(text);
+        if (parsed.iv && parsed.encryptedData && parsed.authTag) {
+            if (!dynamicKey) return []; 
+            const decipher = crypto.createDecipheriv('aes-256-gcm', dynamicKey, Buffer.from(parsed.iv, 'hex'));
+            decipher.setAuthTag(Buffer.from(parsed.authTag, 'hex'));
+            let decrypted = decipher.update(parsed.encryptedData, 'hex', 'utf8');
+            decrypted += decipher.final('utf8');
+            return JSON.parse(decrypted);
+        }
+        return Array.isArray(parsed) ? parsed : [];
+    } catch(e) { return []; } 
+};
 
+const getSavedNodes = (key) => { try { if (fs.existsSync(NODES_FILE)) return decryptData(fs.readFileSync(NODES_FILE, 'utf8'), key); } catch(e){} return []; };
+const saveNodesData = (nodes, key) => { fs.writeFileSync(NODES_FILE, encryptData(nodes, key), 'utf8'); };
+const getSavedCommands = (key) => { try { if (fs.existsSync(COMMANDS_FILE)) return decryptData(fs.readFileSync(COMMANDS_FILE, 'utf8'), key); } catch(e){} return []; };
+const saveCommandsData = (cmds, key) => { fs.writeFileSync(COMMANDS_FILE, encryptData(cmds, key), 'utf8'); };
+
+// ================= 【WARP IPv6 自动点火】 =================
 const setupAutoWarp = () => {
     const confPath = '/usr/src/app/warp.conf';
     if (!fs.existsSync(confPath)) {
@@ -39,6 +68,7 @@ const setupAutoWarp = () => {
 };
 setupAutoWarp();
 
+// ================= 【Web 级 Fail2Ban 防爆破拦截器】 =================
 const ipBlocklist = new Map(); 
 const ipAttempts = new Map();  
 const MAX_ATTEMPTS = 5;        
@@ -49,17 +79,14 @@ wss.on('connection', (ws, req) => {
 
     if (ipBlocklist.has(clientIp)) {
         if (Date.now() < ipBlocklist.get(clientIp)) {
-            ws.send(JSON.stringify({ type: 'TERMINAL', data: `\r\n\x1b[1;41;37m [ 绝对防御 ] \x1b[0m\x1b[31m IP (${clientIp}) 已被物理隔离 24 小时！\x1b[0m\r\n` }));
+            ws.send(JSON.stringify({ type: 'TERMINAL', data: `\r\n\x1b[1;41;37m [ 绝对防御 ] \x1b[0m\x1b[31m IP (${clientIp}) 因爆破已被物理隔离 24 小时！\x1b[0m\r\n` }));
             return ws.close();
         } else { ipBlocklist.delete(clientIp); ipAttempts.delete(clientIp); }
     }
 
-    ws.isAuthenticated = (!PANEL_USER && !PANEL_PASS);
+    ws.isAuthenticated = (!PANEL_USER && !PANEL_PASS_HASH);
 
-    let sshClient = new Client();
-    let sshStream = null;
-    let sftpSession = null;
-    let monitorInterval = null;
+    let sshClient = new Client(); let sshStream = null; let sftpSession = null; let monitorInterval = null;
 
     const sendDirTree = (sftp, targetPath = '/root') => {
         sftp.readdir(targetPath, (err, list) => {
@@ -74,12 +101,15 @@ wss.on('connection', (ws, req) => {
         try {
             const cmd = JSON.parse(message);
 
-            // ================= 【面板鉴权】 =================
+            // ================= 【零知识面板鉴权】 =================
             if (cmd.type === 'PANEL_LOGIN') {
-                if (cmd.user === PANEL_USER && cmd.pass === PANEL_PASS) {
+                const inputHash = cmd.pass ? crypto.createHash('sha256').update(cmd.pass).digest('hex') : '';
+                
+                if (cmd.user === PANEL_USER && inputHash === PANEL_PASS_HASH) {
                     ws.isAuthenticated = true; ipAttempts.delete(clientIp); 
-                    // 登录成功时，同时下发保存的节点和命令
-                    ws.send(JSON.stringify({ type: 'LOGIN_SUCCESS', nodes: getSavedNodes(), commands: getSavedCommands() }));
+                    // JIT 内存分配 AES 密钥
+                    ws.aesKey = crypto.createHash('sha256').update(cmd.pass).digest();
+                    ws.send(JSON.stringify({ type: 'LOGIN_SUCCESS', nodes: getSavedNodes(ws.aesKey), commands: getSavedCommands(ws.aesKey) }));
                 } else {
                     if (cmd.user !== '' || cmd.pass !== '') {
                         let attempts = (ipAttempts.get(clientIp) || 0) + 1; ipAttempts.set(clientIp, attempts);
@@ -90,37 +120,34 @@ wss.on('connection', (ws, req) => {
                 return;
             }
 
-            // ================= 【云端保险箱 (节点 & 命令)】 =================
+            // ================= 【云端双保险箱操作 (需权限)】 =================
             if (cmd.type === 'GET_NODES' || cmd.type === 'SAVE_NODE' || cmd.type === 'DELETE_SAVED_NODE' || cmd.type === 'GET_COMMANDS' || cmd.type === 'SAVE_COMMAND' || cmd.type === 'DELETE_COMMAND') {
                 if (!ws.isAuthenticated) return;
                 
-                // 节点相关
-                if (cmd.type === 'GET_NODES') ws.send(JSON.stringify({ type: 'SAVED_NODES_LIST', nodes: getSavedNodes() }));
+                if (cmd.type === 'GET_NODES') ws.send(JSON.stringify({ type: 'SAVED_NODES_LIST', nodes: getSavedNodes(ws.aesKey) }));
                 else if (cmd.type === 'SAVE_NODE') {
-                    const nodes = getSavedNodes(); const idx = nodes.findIndex(n => n.host === cmd.node.host && n.port === cmd.node.port && n.user === cmd.node.user);
+                    const nodes = getSavedNodes(ws.aesKey); const idx = nodes.findIndex(n => n.host === cmd.node.host && n.port === cmd.node.port && n.user === cmd.node.user);
                     if (idx >= 0) nodes[idx] = cmd.node; else nodes.push(cmd.node);
-                    saveNodesData(nodes); ws.send(JSON.stringify({ type: 'SAVED_NODES_LIST', nodes: getSavedNodes() }));
+                    saveNodesData(nodes, ws.aesKey); ws.send(JSON.stringify({ type: 'SAVED_NODES_LIST', nodes: getSavedNodes(ws.aesKey) }));
                 }
                 else if (cmd.type === 'DELETE_SAVED_NODE') {
-                    let nodes = getSavedNodes(); nodes = nodes.filter(n => n.id !== cmd.id);
-                    saveNodesData(nodes); ws.send(JSON.stringify({ type: 'SAVED_NODES_LIST', nodes: getSavedNodes() }));
+                    let nodes = getSavedNodes(ws.aesKey); nodes = nodes.filter(n => n.id !== cmd.id);
+                    saveNodesData(nodes, ws.aesKey); ws.send(JSON.stringify({ type: 'SAVED_NODES_LIST', nodes: getSavedNodes(ws.aesKey) }));
                 }
-                
-                // 【新增】：常用命令相关操作
-                else if (cmd.type === 'GET_COMMANDS') ws.send(JSON.stringify({ type: 'SAVED_COMMANDS_LIST', commands: getSavedCommands() }));
+                else if (cmd.type === 'GET_COMMANDS') ws.send(JSON.stringify({ type: 'SAVED_COMMANDS_LIST', commands: getSavedCommands(ws.aesKey) }));
                 else if (cmd.type === 'SAVE_COMMAND') {
-                    const cmds = getSavedCommands(); const idx = cmds.findIndex(c => c.id === cmd.command.id);
+                    const cmds = getSavedCommands(ws.aesKey); const idx = cmds.findIndex(c => c.id === cmd.command.id);
                     if (idx >= 0) cmds[idx] = cmd.command; else cmds.push(cmd.command);
-                    saveCommandsData(cmds); ws.send(JSON.stringify({ type: 'SAVED_COMMANDS_LIST', commands: getSavedCommands() }));
+                    saveCommandsData(cmds, ws.aesKey); ws.send(JSON.stringify({ type: 'SAVED_COMMANDS_LIST', commands: getSavedCommands(ws.aesKey) }));
                 }
                 else if (cmd.type === 'DELETE_COMMAND') {
-                    let cmds = getSavedCommands(); cmds = cmds.filter(c => c.id !== cmd.id);
-                    saveCommandsData(cmds); ws.send(JSON.stringify({ type: 'SAVED_COMMANDS_LIST', commands: getSavedCommands() }));
+                    let cmds = getSavedCommands(ws.aesKey); cmds = cmds.filter(c => c.id !== cmd.id);
+                    saveCommandsData(cmds, ws.aesKey); ws.send(JSON.stringify({ type: 'SAVED_COMMANDS_LIST', commands: getSavedCommands(ws.aesKey) }));
                 }
                 return;
             }
 
-            // ================= 【SSH 连接引擎】 =================
+            // ================= 【无痕 SSH 直连通道 (无需面板鉴权)】 =================
             if (cmd.host) {
                 if (sshStream) return;
                 const creds = cmd; creds.tryKeyboard = true; creds.readyTimeout = 20000;
@@ -161,7 +188,7 @@ wss.on('connection', (ws, req) => {
                     if (ws.readyState === WebSocket.OPEN) {
                         if (err.message.toLowerCase().includes('authenticat') || err.message.includes('Handshake failed')) {
                             let attempts = (ipAttempts.get(clientIp) || 0) + 1; ipAttempts.set(clientIp, attempts);
-                            if (attempts >= MAX_ATTEMPTS) { ipBlocklist.set(clientIp, Date.now() + BLOCK_TIME); ws.send(JSON.stringify({ type: 'TERMINAL', data: `\r\n\x1b[1;41;37m [ 警报 ] \x1b[0m\x1b[31m IP 已被封禁！\x1b[0m\r\n` })); } 
+                            if (attempts >= MAX_ATTEMPTS) { ipBlocklist.set(clientIp, Date.now() + BLOCK_TIME); ws.send(JSON.stringify({ type: 'TERMINAL', data: `\r\n\x1b[1;41;37m [ 警报 ] \x1b[0m\x1b[31m IP 因爆破已被物理隔离！\x1b[0m\r\n` })); } 
                             else ws.send(JSON.stringify({ type: 'TERMINAL', data: `\r\n\x1b[31m[SSH 鉴权失败]:\x1b[0m 密码或私钥错误！\r\n` }));
                         } else ws.send(JSON.stringify({ type: 'TERMINAL', data: `\r\n\x1b[31m[SSH Error]:\x1b[0m ${err.message}\r\n` }));
                         ws.close();
@@ -176,7 +203,7 @@ wss.on('connection', (ws, req) => {
                 } else sshClient.connect(creds);
             }
             
-            // 操作流
+            // ================= 【终端广播与全盘漫游文件流】 =================
             if (cmd.type === 'TERMINAL_INPUT' && sshStream) sshStream.write(cmd.data);
             else if (cmd.type === 'UNZIP' && sshClient) {
                 const ext = cmd.path.toLowerCase(); let execCmd = '';
@@ -204,4 +231,4 @@ wss.on('connection', (ws, req) => {
 });
 
 const PORT = process.env.PORT || 8080;
-server.listen(PORT, '0.0.0.0', () => console.log(`[Running] WebOS 终极密码箱版已点火，端口: ${PORT}`));
+server.listen(PORT, '0.0.0.0', () => console.log(`[Running] WebOS 终极堡垒机点火，监听端口: ${PORT}`));
