@@ -12,41 +12,25 @@ app.use(express.static(path.join(__dirname, 'public')));
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
 
-// ================= 【核心新增】：面板鉴权与节点存储配置 =================
+// ================= 【云端保险箱与面板鉴权配置】 =================
 const PANEL_USER = process.env.PANEL_USER || '';
 const PANEL_PASS = process.env.PANEL_PASS || '';
-const NODES_FILE = '/usr/src/app/nodes.json'; // 容器内的节点保险箱
+const NODES_FILE = '/usr/src/app/nodes.json'; 
 
-// 读取已存节点
-const getSavedNodes = () => {
-    try { if (fs.existsSync(NODES_FILE)) return JSON.parse(fs.readFileSync(NODES_FILE, 'utf8')); } catch(e){}
-    return [];
-};
-// 保存节点
-const saveNodesData = (nodes) => {
-    fs.writeFileSync(NODES_FILE, JSON.stringify(nodes, null, 2), 'utf8');
-};
+const getSavedNodes = () => { try { if (fs.existsSync(NODES_FILE)) return JSON.parse(fs.readFileSync(NODES_FILE, 'utf8')); } catch(e){} return []; };
+const saveNodesData = (nodes) => { fs.writeFileSync(NODES_FILE, JSON.stringify(nodes, null, 2), 'utf8'); };
 
 const setupAutoWarp = () => {
     const confPath = '/usr/src/app/warp.conf';
     if (!fs.existsSync(confPath)) {
         console.log('\x1b[33m[Auto-WARP]\x1b[0m 未检测到配置，正在全自动申请 IPv6 节点...');
         try {
-            execSync('wgcf register --accept-tos', { stdio: 'ignore' });
-            execSync('wgcf generate', { stdio: 'ignore' });
-            let conf = fs.readFileSync('wgcf-profile.conf', 'utf8');
-            conf += '\n[Socks5]\nBindAddress = 127.0.0.1:1080\n';
-            fs.writeFileSync(confPath, conf);
-            console.log('\x1b[32m[Auto-WARP]\x1b[0m 申请成功！');
-        } catch (e) {
-            console.error('\x1b[31m[Auto-WARP Error]\x1b[0m 自动申请失败:', e.message);
-        }
+            execSync('wgcf register --accept-tos', { stdio: 'ignore' }); execSync('wgcf generate', { stdio: 'ignore' });
+            let conf = fs.readFileSync('wgcf-profile.conf', 'utf8'); conf += '\n[Socks5]\nBindAddress = 127.0.0.1:1080\n';
+            fs.writeFileSync(confPath, conf); console.log('\x1b[32m[Auto-WARP]\x1b[0m 申请成功！');
+        } catch (e) { console.error('\x1b[31m[Auto-WARP Error]\x1b[0m 自动申请失败:', e.message); }
     }
-    if (fs.existsSync(confPath)) {
-        exec('wireproxy -c ' + confPath + ' -d', (err) => {
-            if (err) console.error('[WARP Tunnel Error]', err);
-        });
-    }
+    if (fs.existsSync(confPath)) { exec('wireproxy -c ' + confPath + ' -d', (err) => { if (err) console.error('[WARP Tunnel Error]', err); }); }
 };
 setupAutoWarp();
 
@@ -60,12 +44,12 @@ wss.on('connection', (ws, req) => {
 
     if (ipBlocklist.has(clientIp)) {
         if (Date.now() < ipBlocklist.get(clientIp)) {
-            ws.send(JSON.stringify({ type: 'TERMINAL', data: `\r\n\x1b[1;41;37m [ 绝对防御 ] \x1b[0m\x1b[31m IP (${clientIp}) 已被物理隔离！\x1b[0m\r\n` }));
+            ws.send(JSON.stringify({ type: 'TERMINAL', data: `\r\n\x1b[1;41;37m [ 绝对防御 ] \x1b[0m\x1b[31m IP (${clientIp}) 已被物理隔离 24 小时！\x1b[0m\r\n` }));
             return ws.close();
         } else { ipBlocklist.delete(clientIp); ipAttempts.delete(clientIp); }
     }
 
-    ws.isAuthenticated = (!PANEL_USER && !PANEL_PASS); // 如果没有设置密码，默认通过
+    ws.isAuthenticated = (!PANEL_USER && !PANEL_PASS); // 无密码时默认所有人都是管理员
 
     let sshClient = new Client();
     let sshStream = null;
@@ -85,55 +69,49 @@ wss.on('connection', (ws, req) => {
         try {
             const cmd = JSON.parse(message);
 
-            // ================= 【核心拦截器】：处理面板登录 =================
+            // ================= 【核心控制流：保险箱鉴权与存取】 =================
             if (cmd.type === 'PANEL_LOGIN') {
                 if (cmd.user === PANEL_USER && cmd.pass === PANEL_PASS) {
                     ws.isAuthenticated = true;
+                    ipAttempts.delete(clientIp); // 登录成功，清空犯罪记录
                     ws.send(JSON.stringify({ type: 'LOGIN_SUCCESS', nodes: getSavedNodes() }));
                 } else {
-                    let attempts = (ipAttempts.get(clientIp) || 0) + 1; ipAttempts.set(clientIp, attempts);
-                    if (attempts >= MAX_ATTEMPTS) { ipBlocklist.set(clientIp, Date.now() + BLOCK_TIME); }
+                    // 如果前端是空请求探测(探测是否需要密码)，不计入封禁惩罚
+                    if (cmd.user !== '' || cmd.pass !== '') {
+                        let attempts = (ipAttempts.get(clientIp) || 0) + 1; ipAttempts.set(clientIp, attempts);
+                        if (attempts >= MAX_ATTEMPTS) { ipBlocklist.set(clientIp, Date.now() + BLOCK_TIME); }
+                    }
                     ws.send(JSON.stringify({ type: 'LOGIN_FAIL', msg: '面板用户名或密码错误！' }));
                 }
                 return;
             }
 
-            // 【安全校验】：如果未登录，直接踢下线
-            if (!ws.isAuthenticated) {
-                ws.send(JSON.stringify({ type: 'TERMINAL', data: `\r\n\x1b[31m[安全拦截] 您未登录面板，拒绝连接请求！\x1b[0m\r\n` }));
-                return ws.close();
-            }
-
-            // ================= 【处理保险箱操作】 =================
-            if (cmd.type === 'GET_NODES') {
-                ws.send(JSON.stringify({ type: 'SAVED_NODES_LIST', nodes: getSavedNodes() }));
-                return;
-            }
-            if (cmd.type === 'SAVE_NODE') {
-                const nodes = getSavedNodes();
-                const existingIndex = nodes.findIndex(n => n.host === cmd.node.host && n.port === cmd.node.port && n.user === cmd.node.user);
-                if (existingIndex >= 0) nodes[existingIndex] = cmd.node; // 更新
-                else nodes.push(cmd.node); // 新增
-                saveNodesData(nodes);
-                ws.send(JSON.stringify({ type: 'SAVED_NODES_LIST', nodes: getSavedNodes() }));
-                return;
-            }
-            if (cmd.type === 'DELETE_SAVED_NODE') {
-                let nodes = getSavedNodes();
-                nodes = nodes.filter(n => n.id !== cmd.id);
-                saveNodesData(nodes);
-                ws.send(JSON.stringify({ type: 'SAVED_NODES_LIST', nodes: getSavedNodes() }));
+            // 【隔离护城河】：只有认证用户才能触碰云端保险箱，否则直接驳回
+            if (cmd.type === 'GET_NODES' || cmd.type === 'SAVE_NODE' || cmd.type === 'DELETE_SAVED_NODE') {
+                if (!ws.isAuthenticated) return;
+                
+                if (cmd.type === 'GET_NODES') {
+                    ws.send(JSON.stringify({ type: 'SAVED_NODES_LIST', nodes: getSavedNodes() }));
+                }
+                else if (cmd.type === 'SAVE_NODE') {
+                    const nodes = getSavedNodes();
+                    const existingIndex = nodes.findIndex(n => n.host === cmd.node.host && n.port === cmd.node.port && n.user === cmd.node.user);
+                    if (existingIndex >= 0) nodes[existingIndex] = cmd.node; else nodes.push(cmd.node);
+                    saveNodesData(nodes); ws.send(JSON.stringify({ type: 'SAVED_NODES_LIST', nodes: getSavedNodes() }));
+                }
+                else if (cmd.type === 'DELETE_SAVED_NODE') {
+                    let nodes = getSavedNodes(); nodes = nodes.filter(n => n.id !== cmd.id);
+                    saveNodesData(nodes); ws.send(JSON.stringify({ type: 'SAVED_NODES_LIST', nodes: getSavedNodes() }));
+                }
                 return;
             }
 
-            // ================= 【处理正常 SSH 连接】 =================
+            // ================= 【常规无痕模式 SSH 引擎 (无需鉴权即可使用)】 =================
             if (cmd.host) {
-                if (sshStream) return; // 已连接则忽略
-                const creds = cmd;
-                creds.tryKeyboard = true; creds.readyTimeout = 20000;
+                if (sshStream) return;
+                const creds = cmd; creds.tryKeyboard = true; creds.readyTimeout = 20000;
 
                 sshClient.on('ready', () => {
-                    ipAttempts.delete(clientIp);
                     sshClient.shell({ term: 'xterm-256color' }, (err, stream) => {
                         if (err) return ws.close();
                         sshStream = stream;
@@ -143,8 +121,8 @@ wss.on('connection', (ws, req) => {
                     });
 
                     sshClient.sftp((err, sftp) => { if (!err) { sftpSession = sftp; sendDirTree(sftpSession, '/root'); } });
-
                     sshClient.lastRx = undefined; sshClient.lastTx = undefined;
+
                     monitorInterval = setInterval(() => {
                         const mCmd = `sh -c "export LC_ALL=C; top -bn1 | grep -i -m1 'Cpu(s)' | awk '{print \\$2+\\$4}'; free | awk '/Mem:/{m=\\$3/\\$2*100.0} /Swap:/{s=(\\$2>0?\\$3/\\$2*100.0:0)} END{print m; print s+0}'; cat /proc/net/dev | awk 'NR>2{rx+=\\$2; tx+=\\$10} END{print rx, tx}'; cat /proc/uptime | awk '{print \\$1}'; cat /proc/loadavg | awk '{print \\$1,\\$2,\\$3}'; ps -eo rss,pcpu,comm --sort=-%cpu | head -n 6"`;
                         sshClient.exec(mCmd, (e, exStream) => {
@@ -174,11 +152,7 @@ wss.on('connection', (ws, req) => {
                     if (prompts.length > 0 && prompts[0].prompt.toLowerCase().includes('password')) finish([creds.password]); else finish([]);
                 }).on('error', (err) => {
                     if (ws.readyState === WebSocket.OPEN) {
-                        if (err.message.toLowerCase().includes('authenticat') || err.message.includes('Handshake failed')) {
-                            let attempts = (ipAttempts.get(clientIp) || 0) + 1; ipAttempts.set(clientIp, attempts);
-                            if (attempts >= MAX_ATTEMPTS) { ipBlocklist.set(clientIp, Date.now() + BLOCK_TIME); ws.send(JSON.stringify({ type: 'TERMINAL', data: `\r\n\x1b[1;41;37m [ 警报 ] \x1b[0m\x1b[31m IP 已被封禁！\x1b[0m\r\n` })); } 
-                            else ws.send(JSON.stringify({ type: 'TERMINAL', data: `\r\n\x1b[31m[SSH 鉴权失败]:\x1b[0m 密码或私钥错误！\r\n` }));
-                        } else ws.send(JSON.stringify({ type: 'TERMINAL', data: `\r\n\x1b[31m[SSH Error]:\x1b[0m ${err.message}\r\n` }));
+                        ws.send(JSON.stringify({ type: 'TERMINAL', data: `\r\n\x1b[31m[SSH 失败]:\x1b[0m ${err.message}\r\n` }));
                         ws.close();
                     }
                 });
@@ -191,7 +165,7 @@ wss.on('connection', (ws, req) => {
                 } else sshClient.connect(creds);
             }
             
-            // ================= 【处理文件管理与广播命令】 =================
+            // 操作流
             if (cmd.type === 'TERMINAL_INPUT' && sshStream) sshStream.write(cmd.data);
             else if (cmd.type === 'UNZIP' && sshClient) {
                 const ext = cmd.path.toLowerCase(); let execCmd = '';
@@ -220,4 +194,4 @@ wss.on('connection', (ws, req) => {
 });
 
 const PORT = process.env.PORT || 8080;
-server.listen(PORT, '0.0.0.0', () => console.log(`[Running] WebOS 终极密码箱版已点火，端口: ${PORT}`));
+server.listen(PORT, '0.0.0.0', () => console.log(`[Running] WebOS 终极访客护城河版已点火，端口: ${PORT}`));
