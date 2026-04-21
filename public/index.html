@@ -41,7 +41,6 @@
         .file-actions span:hover { opacity: 1; color: var(--accent); transform: scale(1.1); }
 
         #fileManager { flex: 1; overflow-y: auto; padding: 5px; font-size: 13px; }
-        /* 【核心修复】：强制文本左对齐，防止继承居中属性 */
         .file-item { padding: 6px 10px; cursor: pointer; border-radius: 4px; display: flex; align-items: center; justify-content: space-between; user-select: none; border-left: 2px solid transparent; text-align: left;}
         .file-item:hover { background: rgba(0, 255, 102, 0.1); color: var(--accent); }
         .file-item.selected { background: rgba(0, 255, 102, 0.2); border-left-color: var(--accent); color: #fff; }
@@ -161,7 +160,7 @@
             <div id="serverList"></div>
             
             <div class="panel-title" style="border-top: 1px solid var(--border);">
-                <span style="flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-right: 10px;" title="📁 /root">📁 /root (<span id="currentFileHost">None</span>)</span> 
+                <span id="currentDirPath" style="flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-right: 10px;" title="📁 /root">📁 /root</span> 
                 <span class="file-actions">
                     <span title="新建文件" onclick="createNode('file')">📄+</span>
                     <span title="新建文件夹" onclick="createNode('dir')">📁+</span>
@@ -224,6 +223,10 @@
         let currentSortDir = 'desc';
         let processPollingInterval = null;
 
+        // 【核心新增】：路径解析辅助函数
+        function joinPath(dir, file) { return dir.endsWith('/') ? dir + file : dir + '/' + file; }
+        function getParentDir(dir) { if(dir === '/') return '/'; const parts = dir.split('/').filter(Boolean); parts.pop(); return '/' + parts.join('/'); }
+
         const editor = ace.edit("editorArea");
         editor.setTheme("ace/theme/twilight"); 
         editor.session.setMode("ace/mode/sh"); 
@@ -244,49 +247,69 @@
         };
 
         window.saveCurrentFile = function() {
-            const filename = document.getElementById('currentFileName').innerText;
-            if(!activeId || !sessions[activeId] || !sessions[activeId].ws || filename === 'None') return;
-            sessions[activeId].ws.send(JSON.stringify({ type: 'WRITE_FILE', filename: filename, content: editor.getValue() }));
+            if(!activeId || !sessions[activeId] || !sessions[activeId].ws || !sessions[activeId].currentOpenFilePath) return;
+            const filepath = sessions[activeId].currentOpenFilePath;
+            sessions[activeId].ws.send(JSON.stringify({ type: 'WRITE_FILE', path: filepath, dir: sessions[activeId].currentDir, content: editor.getValue() }));
             const saveBtn = document.getElementById('saveIndicator');
             saveBtn.innerText = '⏳ Saving...'; saveBtn.style.color = '#ffeb3b';
             setTimeout(() => { saveBtn.innerText = '✔ Saved'; saveBtn.style.color = '#00ff66'; setTimeout(() => { saveBtn.innerText = 'Save (Ctrl+S)'; saveBtn.style.color = '#fff'; }, 2000); }, 500);
         };
 
+        // 【核心更新】：增删改查全适配绝对路径
         window.createNode = function(type) {
             if(!activeId || !sessions[activeId] || !sessions[activeId].ws) return;
-            const name = prompt(`请输入新${type === 'file' ? '文件' : '文件夹'}名称：`);
-            if(name && name.trim()) sessions[activeId].ws.send(JSON.stringify({ type: type==='file'?'CREATE_FILE':'CREATE_DIR', [type==='file'?'filename':'dirname']: name.trim() }));
+            const name = prompt(`在当前目录新建${type === 'file' ? '文件' : '文件夹'}，名称：`);
+            if(name && name.trim()) {
+                const target = joinPath(sessions[activeId].currentDir, name.trim());
+                sessions[activeId].ws.send(JSON.stringify({ type: type==='file'?'CREATE_FILE':'CREATE_DIR', path: target, dir: sessions[activeId].currentDir }));
+            }
         };
         window.renameNode = function() {
             if(!activeId || !sessions[activeId] || !sessions[activeId].ws) return;
             const node = sessions[activeId].selectedNode;
-            if(!node) return alert('请先在下方列表中选中一个文件。');
+            if(!node) return alert('请先选中一个文件。');
             const newName = prompt(`重命名为：`, node.name);
-            if(newName && newName.trim() !== node.name) sessions[activeId].ws.send(JSON.stringify({ type: 'RENAME_NODE', oldName: node.name, newName: newName.trim() }));
+            if(newName && newName.trim() !== node.name) {
+                const oldPath = joinPath(sessions[activeId].currentDir, node.name);
+                const newPath = joinPath(sessions[activeId].currentDir, newName.trim());
+                sessions[activeId].ws.send(JSON.stringify({ type: 'RENAME_NODE', oldPath, newPath, dir: sessions[activeId].currentDir }));
+            }
         };
         window.deleteNode = function() {
             if(!activeId || !sessions[activeId] || !sessions[activeId].ws) return;
             const node = sessions[activeId].selectedNode;
             if(!node) return alert('请先选中一个文件。');
             if(confirm(`⚠️ 确定要删除 [ ${node.name} ] 吗？`)) {
-                sessions[activeId].ws.send(JSON.stringify({ type: 'DELETE_NODE', filename: node.name, isDir: node.isDir }));
-                if (!node.isDir && document.getElementById('currentFileName').innerText === node.name) { document.getElementById('currentFileName').innerText = 'None'; editor.setValue('// 文件已删除...', -1); }
+                const target = joinPath(sessions[activeId].currentDir, node.name);
+                sessions[activeId].ws.send(JSON.stringify({ type: 'DELETE_NODE', path: target, isDir: node.isDir, dir: sessions[activeId].currentDir }));
+                if (!node.isDir && document.getElementById('currentFileName').innerText === node.name) { document.getElementById('currentFileName').innerText = 'None'; sessions[activeId].currentOpenFilePath = null; editor.setValue('// 文件已删除...', -1); }
             }
         };
-        window.refreshDir = function() { if(activeId && sessions[activeId]) sessions[activeId].ws.send(JSON.stringify({ type: 'REFRESH_DIR' })); };
+        window.refreshDir = function() { if(activeId && sessions[activeId]) sessions[activeId].ws.send(JSON.stringify({ type: 'REFRESH_DIR', path: sessions[activeId].currentDir })); };
+
+        // 【核心新增】：进入目录逻辑
+        window.enterDir = function(name) {
+            if(!activeId || !sessions[activeId].ws) return;
+            let target = sessions[activeId].currentDir;
+            if (name === '..') target = getParentDir(target);
+            else target = joinPath(target, name);
+            sessions[activeId].ws.send(JSON.stringify({ type: 'REFRESH_DIR', path: target }));
+        };
 
         window.unzipFile = function(filename, e) {
             e.stopPropagation();
             if(!activeId || !sessions[activeId].ws) return;
-            sessions[activeId].term.writeln(`\r\n\x1b[33m[System] 正在云端解压 ${filename}，请稍候...\x1b[0m`);
-            sessions[activeId].ws.send(JSON.stringify({ type: 'UNZIP', filename }));
+            const target = joinPath(sessions[activeId].currentDir, filename);
+            sessions[activeId].term.writeln(`\r\n\x1b[33m[System] 正在云端解压 ${target}，请稍候...\x1b[0m`);
+            sessions[activeId].ws.send(JSON.stringify({ type: 'UNZIP', path: target, dir: sessions[activeId].currentDir }));
         };
 
         window.downloadFile = function(filename, e) {
             e.stopPropagation();
             if(!activeId || !sessions[activeId].ws) return;
             document.getElementById('saveIndicator').innerText = '⏳ Downloading...';
-            sessions[activeId].ws.send(JSON.stringify({ type: 'DOWNLOAD_FILE', filename }));
+            const target = joinPath(sessions[activeId].currentDir, filename);
+            sessions[activeId].ws.send(JSON.stringify({ type: 'DOWNLOAD_FILE', path: target }));
         };
 
         window.openProcessModal = function() {
@@ -352,23 +375,26 @@
             const termDiv = document.createElement('div'); termDiv.className = 'terminal-wrapper'; termDiv.id = `term_${id.replace(/\W/g, '_')}`; document.getElementById('terminalsContainer').appendChild(termDiv);
             const term = new Terminal({ cursorBlink: true, theme: { background: '#000', foreground: '#a0c2a8' }, fontFamily: 'Consolas' }); const fitAddon = new FitAddon.FitAddon(); term.loadAddon(fitAddon); term.open(termDiv);
 
+            // 【核心重构】：基于动态目录的拖拽上传
             termDiv.addEventListener('dragover', (e) => { e.preventDefault(); termDiv.style.boxShadow = 'inset 0 0 50px rgba(0, 255, 102, 0.3)'; });
             termDiv.addEventListener('dragleave', (e) => { termDiv.style.boxShadow = 'none'; });
             termDiv.addEventListener('drop', (e) => {
                 e.preventDefault(); termDiv.style.boxShadow = 'none';
                 if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
                     const file = e.dataTransfer.files[0];
-                    term.writeln(`\r\n\x1b[33m[黑洞传送门] 检测到文件拖拽，正在极速直穿 SFTP 写入至: /root/${file.name} (${(file.size/1024).toFixed(1)} KB)...\x1b[0m`);
+                    const targetPath = joinPath(sessions[id].currentDir, file.name);
+                    term.writeln(`\r\n\x1b[33m[黑洞传送门] 正在极速直穿 SFTP 写入至: ${targetPath} (${(file.size/1024).toFixed(1)} KB)...\x1b[0m`);
                     const reader = new FileReader();
                     reader.onload = (ev) => {
                         const base64 = ev.target.result.split(',')[1];
-                        if (sessions[id].ws) sessions[id].ws.send(JSON.stringify({ type: 'UPLOAD_FILE', filename: file.name, data: base64 }));
+                        if (sessions[id].ws) sessions[id].ws.send(JSON.stringify({ type: 'UPLOAD_FILE', path: targetPath, dir: sessions[id].currentDir, data: base64 }));
                     };
                     reader.readAsDataURL(file);
                 }
             });
 
-            sessions[id] = { id, host, ws: null, term, fitAddon, termDiv, filesHTML: '<div style="color:#666;text-align:center;">拉取目录中...</div>', selectedNode: null, processes: [], fullProcessList: null, rxSpeed: 0, txSpeed: 0, uptime: 0, load: '0.00 0.00 0.00', swap: 0 };
+            // 初始化 session 时增加 currentDir 和 currentOpenFilePath
+            sessions[id] = { id, host, ws: null, term, fitAddon, termDiv, filesHTML: '<div style="color:#666;text-align:center;">拉取目录中...</div>', selectedNode: null, currentDir: '/root', currentOpenFilePath: null, processes: [], fullProcessList: null, rxSpeed: 0, txSpeed: 0, uptime: 0, load: '0.00 0.00 0.00', swap: 0 };
             term.writeln('\x1b[33m[Engine]\x1b[0m 向集群分配节点中...');
             const ws = new WebSocket((window.location.protocol === 'https:' ? 'wss://' : 'ws://') + window.location.host + '/'); sessions[id].ws = ws;
 
@@ -379,28 +405,39 @@
                 const packet = JSON.parse(e.data);
                 if (packet.type === 'TERMINAL' || packet.type === 'SYSTEM_MSG') term.write(packet.data);
                 else if (packet.type === 'SFTP_TREE') {
-                    sessions[id].filesHTML = packet.files.map(f => {
+                    sessions[id].currentDir = packet.path; // 更新当前目录
+                    let html = '';
+                    if (packet.path !== '/') {
+                        html += `<div class="file-item" ondblclick="enterDir('..')"><div style="flex:1; text-align:left;"><span class="icon-dir">🔙</span> .. (上一级)</div></div>`;
+                    }
+                    html += packet.files.map(f => {
                         const isZip = f.name.endsWith('.zip') || f.name.endsWith('.tar.gz') || f.name.endsWith('.tgz');
                         const unzipBtn = (!f.isDir && isZip) ? `<span class="f-action" title="云端秒解压" onclick="unzipFile('${f.name}', event)">📦</span>` : '';
                         const downloadBtn = !f.isDir ? `<span class="f-action" title="下载至本地" onclick="downloadFile('${f.name}', event)">⏬</span>` : '';
-                        return `<div class="file-item" onclick="selectFileDom(this, '${f.name}', ${f.isDir})" ${f.isDir?'':`ondblclick="openFile('${f.name}')"`}>
+                        // 文件夹双击切入，文件双击打开编辑
+                        const dblClick = f.isDir ? `ondblclick="enterDir('${f.name}')"` : `ondblclick="openFile('${f.name}')"`;
+                        return `<div class="file-item" onclick="selectFileDom(this, '${f.name}', ${f.isDir})" ${dblClick}>
                             <div style="flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; text-align:left;">${f.isDir?'<span class="icon-dir">📁</span>':'<span class="icon-file">📄</span>'} ${f.name}</div>
                             <div class="f-actions-inline">${unzipBtn}${downloadBtn}</div>
                         </div>`;
                     }).join('');
+                    sessions[id].filesHTML = html;
                     if(sessions[id].selectedNode && !packet.files.some(f => f.name === sessions[id].selectedNode.name)) sessions[id].selectedNode = null;
                     if(activeId === id) updateActiveUI();
                 }
                 else if (packet.type === 'DOWNLOAD_READY') {
-                    const link = document.createElement('a');
-                    link.href = 'data:application/octet-stream;base64,' + packet.data;
-                    link.download = packet.filename;
+                    const link = document.createElement('a'); link.href = 'data:application/octet-stream;base64,' + packet.data; link.download = packet.filename;
                     document.body.appendChild(link); link.click(); document.body.removeChild(link);
                     document.getElementById('saveIndicator').innerText = '✔ Download Success';
                     setTimeout(() => { document.getElementById('saveIndicator').innerText = 'Save (Ctrl+S)'; document.getElementById('saveIndicator').style.color = '#fff'; }, 3000);
                 }
                 else if (packet.type === 'FILE_CONTENT') {
-                    if (activeId === id) { editor.setValue(packet.content, -1); editor.session.setMode(`ace/mode/${{'js':'javascript','json':'json','html':'html','css':'css','sh':'sh','bash':'sh','py':'python','yaml':'yaml','yml':'yaml','conf':'ini','xml':'xml'}[packet.filename.split('.').pop().toLowerCase()] || 'text'}`); }
+                    if (activeId === id) { 
+                        document.getElementById('currentFileName').innerText = packet.filename;
+                        sessions[activeId].currentOpenFilePath = packet.path;
+                        editor.setValue(packet.content, -1); 
+                        editor.session.setMode(`ace/mode/${{'js':'javascript','json':'json','html':'html','css':'css','sh':'sh','bash':'sh','py':'python','yaml':'yaml','yml':'yaml','conf':'ini','xml':'xml'}[packet.filename.split('.').pop().toLowerCase()] || 'text'}`); 
+                    }
                 }
                 else if (packet.type === 'FULL_PROCESS_LIST') {
                     if (activeId === id) { sessions[id].fullProcessList = packet.list; renderFullProcessList(); }
@@ -415,7 +452,6 @@
             };
             ws.onclose = () => term.writeln('\r\n\x1b[31m[System]\x1b[0m 节点连接断开。'); ws.onerror = () => term.writeln('\r\n\x1b[31m[System]\x1b[0m WebSocket 隧道建立失败。');
             
-            // 【核心修复】：为节点列表也增加超长溢出处理
             switchSession(id); renderServerList();
         }
 
@@ -423,13 +459,14 @@
         function switchSession(id) {
             if(!sessions[id]) return; activeId = id; document.querySelectorAll('.terminal-wrapper').forEach(el => el.classList.remove('active')); sessions[id].termDiv.classList.add('active');
             setTimeout(() => sessions[id].fitAddon.fit(), 50); document.getElementById('currentFileHost').innerText = sessions[id].host; document.getElementById('currentTermHost').innerText = sessions[id].id;
+            
             gaugeChart.setOption({ series: [{ data: [{ value: (sessions[id].cpu || 0).toFixed(1), name: 'CPU' }] }, { data: [{ value: (sessions[id].mem || 0).toFixed(1), name: 'RAM' }] }, { data: [{ value: (sessions[id].swap || 0).toFixed(1), name: 'SWAP' }] }] });
             renderProcesses(sessions[id].processes); document.getElementById('sysUptime').innerText = formatUptime(sessions[id].uptime); document.getElementById('sysLoad').innerText = sessions[id].load || '--'; document.getElementById('sysRx').innerText = (sessions[id].rxSpeed !== undefined ? sessions[id].rxSpeed : '--') + ' KB/s'; document.getElementById('sysTx').innerText = (sessions[id].txSpeed !== undefined ? sessions[id].txSpeed : '--') + ' KB/s';
             renderServerList(); updateActiveUI();
         }
         function closeSession(id, event) {
             event.stopPropagation(); if(sessions[id].ws) sessions[id].ws.close(); sessions[id].term.dispose(); sessions[id].termDiv.remove(); delete sessions[id];
-            if(activeId === id) { const remaining = Object.keys(sessions); if(remaining.length > 0) switchSession(remaining[0]); else { activeId = null; document.getElementById('currentFileHost').innerText = 'None'; document.getElementById('currentTermHost').innerText = 'bash'; document.getElementById('fileManager').innerHTML = '<div style="text-align: center; margin-top: 10px;">无连接的节点</div>'; renderProcesses([]); resetCharts(); document.getElementById('sysUptime').innerText = '--'; document.getElementById('sysLoad').innerText = '--'; document.getElementById('sysRx').innerText = '-- KB/s'; document.getElementById('sysTx').innerText = '-- KB/s'; showLoginBox(); } }
+            if(activeId === id) { const remaining = Object.keys(sessions); if(remaining.length > 0) switchSession(remaining[0]); else { activeId = null; document.getElementById('currentFileHost').innerText = 'None'; document.getElementById('currentTermHost').innerText = 'bash'; document.getElementById('fileManager').innerHTML = '<div style="text-align: center; margin-top: 10px;">无连接的节点</div>'; document.getElementById('currentDirPath').innerText = '📁 /root'; document.getElementById('currentDirPath').title = '📁 /root'; renderProcesses([]); resetCharts(); document.getElementById('sysUptime').innerText = '--'; document.getElementById('sysLoad').innerText = '--'; document.getElementById('sysRx').innerText = '-- KB/s'; document.getElementById('sysTx').innerText = '-- KB/s'; showLoginBox(); } }
             renderServerList();
         }
         function renderServerList() { 
@@ -442,9 +479,25 @@
                 </div>
             `).join(''); 
         }
-        function updateActiveUI() { if(activeId && sessions[activeId]) { document.getElementById('fileManager').innerHTML = sessions[activeId].filesHTML; if(sessions[activeId].selectedNode) { const items = document.querySelectorAll('.file-item'); for(let i=0; i<items.length; i++) { if(items[i].innerText.includes(sessions[activeId].selectedNode.name)) { items[i].classList.add('selected'); break; } } } } }
+        function updateActiveUI() { 
+            if(activeId && sessions[activeId]) { 
+                document.getElementById('fileManager').innerHTML = sessions[activeId].filesHTML; 
+                // 【核心更新】：动态显示当前所处目录
+                document.getElementById('currentDirPath').innerText = '📁 ' + sessions[activeId].currentDir;
+                document.getElementById('currentDirPath').title = '📁 ' + sessions[activeId].currentDir;
+                
+                if(sessions[activeId].selectedNode) { const items = document.querySelectorAll('.file-item'); for(let i=0; i<items.length; i++) { if(items[i].innerText.includes(sessions[activeId].selectedNode.name)) { items[i].classList.add('selected'); break; } } } 
+            } 
+        }
         window.addEventListener('resize', () => { if(activeId && sessions[activeId]) sessions[activeId].fitAddon.fit(); });
-        window.openFile = function(filename) { if(!activeId || !sessions[activeId] || !sessions[activeId].ws) return; document.getElementById('currentFileName').innerText = filename; editor.setValue(`// 正在从节点拉取文件流: /root/${filename} \n// 🚀 Engine Requesting...`, -1); sessions[activeId].ws.send(JSON.stringify({ type: 'READ_FILE', filename: filename })); };
+        
+        window.openFile = function(filename) { 
+            if(!activeId || !sessions[activeId] || !sessions[activeId].ws) return; 
+            const targetPath = joinPath(sessions[activeId].currentDir, filename);
+            document.getElementById('currentFileName').innerText = filename; 
+            editor.setValue(`// 正在从节点拉取文件流: ${targetPath} \n// 🚀 Engine Requesting...`, -1); 
+            sessions[activeId].ws.send(JSON.stringify({ type: 'READ_FILE', path: targetPath })); 
+        };
     </script>
 </body>
 </html>
