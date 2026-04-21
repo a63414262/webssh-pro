@@ -14,8 +14,10 @@ const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
 
 // ================= 【云端保险箱与面板鉴权配置】 =================
-const PANEL_USER = process.env.PANEL_USER || '';
-const PANEL_PASS_HASH = process.env.PANEL_PASS_HASH || ''; // 仅存哈希，不存明文！
+const PANEL_USER = (process.env.PANEL_USER || '').trim();
+// 【核心修复】：强力清洗环境变量！剃掉空格、换行、多余的符号，并强制转为小写
+const PANEL_PASS_HASH = (process.env.PANEL_PASS_HASH || '').split(/\s+/)[0].trim().toLowerCase();
+
 const NODES_FILE = '/usr/src/app/nodes.json'; 
 const COMMANDS_FILE = '/usr/src/app/commands.json'; 
 
@@ -101,14 +103,17 @@ wss.on('connection', (ws, req) => {
         try {
             const cmd = JSON.parse(message);
 
-            // ================= 【零知识面板鉴权】 =================
+            // ================= 【零知识面板鉴权 (带极强容错)】 =================
             if (cmd.type === 'PANEL_LOGIN') {
-                const inputHash = cmd.pass ? crypto.createHash('sha256').update(cmd.pass).digest('hex') : '';
+                const inputHash = cmd.pass ? crypto.createHash('sha256').update(cmd.pass).digest('hex').toLowerCase() : '';
                 
-                if (cmd.user === PANEL_USER && inputHash === PANEL_PASS_HASH) {
+                // 逻辑校验：如果环境变量是空的，则放行无痕模式；否则必须精准匹配
+                const isMatch = (PANEL_USER === '' && PANEL_PASS_HASH === '') || (cmd.user === PANEL_USER && inputHash === PANEL_PASS_HASH);
+
+                if (isMatch) {
                     ws.isAuthenticated = true; ipAttempts.delete(clientIp); 
-                    // JIT 内存分配 AES 密钥
-                    ws.aesKey = crypto.createHash('sha256').update(cmd.pass).digest();
+                    // JIT 内存分配 AES 密钥 (如果是无密码访客模式，密钥为 null)
+                    ws.aesKey = cmd.pass ? crypto.createHash('sha256').update(cmd.pass).digest() : null;
                     ws.send(JSON.stringify({ type: 'LOGIN_SUCCESS', nodes: getSavedNodes(ws.aesKey), commands: getSavedCommands(ws.aesKey) }));
                 } else {
                     if (cmd.user !== '' || cmd.pass !== '') {
@@ -231,4 +236,4 @@ wss.on('connection', (ws, req) => {
 });
 
 const PORT = process.env.PORT || 8080;
-server.listen(PORT, '0.0.0.0', () => console.log(`[Running] WebOS 终极堡垒机点火，监听端口: ${PORT}`));
+server.listen(PORT, '0.0.0.0', () => console.log(`[Running] WebOS 终极容错鉴权版已点火，监听端口: ${PORT}`));
