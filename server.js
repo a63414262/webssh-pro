@@ -15,16 +15,15 @@ const wss = new WebSocket.Server({ server });
 
 // ================= 【云端保险箱与面板鉴权配置】 =================
 const PANEL_USER = (process.env.PANEL_USER || '').trim();
-// 【强力清洗引擎】：剃掉环境变量里的多余空格、换行符，并统一转小写
 const PANEL_PASS_HASH = (process.env.PANEL_PASS_HASH || '').split(/\s+/)[0].trim().toLowerCase();
 
-// 【站长免死金牌】：在此名单内的 IP 绝对不会被封禁 (英文逗号分隔)
+// 【核心新增】：站长免死金牌（IP 白名单），支持英文逗号分隔多个 IP
 const PANEL_IP_WHITELIST = (process.env.PANEL_IP_WHITELIST || '').split(',').map(ip => ip.trim()).filter(Boolean);
 
 const NODES_FILE = '/usr/src/app/nodes.json'; 
 const COMMANDS_FILE = '/usr/src/app/commands.json'; 
 
-// ================= 【JIT 军事级加解密引擎 (密钥不落地)】 =================
+// ================= 【JIT 军事级加解密引擎】 =================
 const encryptData = (data, dynamicKey) => {
     if (!dynamicKey) return JSON.stringify(data); 
     try {
@@ -82,9 +81,10 @@ const BLOCK_TIME = 24 * 60 * 60 * 1000;
 wss.on('connection', (ws, req) => {
     const clientIp = req.headers['x-forwarded-for'] ? req.headers['x-forwarded-for'].split(',')[0].trim() : req.socket.remoteAddress;
     
-    // 判断当前 IP 是否享有白名单豁免特权
+    // 【核心新增】：判断当前 IP 是否享有豁免特权
     const isWhiteIp = PANEL_IP_WHITELIST.includes(clientIp);
 
+    // 如果不是白名单IP，且在黑名单里，直接踢掉
     if (!isWhiteIp && ipBlocklist.has(clientIp)) {
         if (Date.now() < ipBlocklist.get(clientIp)) {
             ws.send(JSON.stringify({ type: 'TERMINAL', data: `\r\n\x1b[1;41;37m [ 绝对防御 ] \x1b[0m\x1b[31m IP (${clientIp}) 因爆破已被物理隔离 24 小时！\x1b[0m\r\n` }));
@@ -109,41 +109,26 @@ wss.on('connection', (ws, req) => {
         try {
             const cmd = JSON.parse(message);
 
-            // ================= 【零知识面板鉴权 (带精准报错诊断)】 =================
+            // ================= 【零知识面板鉴权】 =================
             if (cmd.type === 'PANEL_LOGIN') {
                 const inputHash = cmd.pass ? crypto.createHash('sha256').update(cmd.pass).digest('hex').toLowerCase() : '';
-                
-                // 1. 检查是不是什么都没配置（无痕模式）
-                if (PANEL_USER === '' && PANEL_PASS_HASH === '') {
-                    if (cmd.user === '' && cmd.pass === '') {
-                        ws.isAuthenticated = true; ipAttempts.delete(clientIp); ws.aesKey = null;
-                        ws.send(JSON.stringify({ type: 'LOGIN_SUCCESS', nodes: getSavedNodes(null), commands: getSavedCommands(null) }));
-                        return;
+                const isMatch = (PANEL_USER === '' && PANEL_PASS_HASH === '') || (cmd.user === PANEL_USER && inputHash === PANEL_PASS_HASH);
+
+                if (isMatch) {
+                    ws.isAuthenticated = true; ipAttempts.delete(clientIp); 
+                    ws.aesKey = cmd.pass ? crypto.createHash('sha256').update(cmd.pass).digest() : null;
+                    ws.send(JSON.stringify({ type: 'LOGIN_SUCCESS', nodes: getSavedNodes(ws.aesKey), commands: getSavedCommands(ws.aesKey) }));
+                } else {
+                    // 【核心修改】：只有非白名单 IP 输错密码才会被记账封禁
+                    if (!isWhiteIp && (cmd.user !== '' || cmd.pass !== '')) {
+                        let attempts = (ipAttempts.get(clientIp) || 0) + 1; ipAttempts.set(clientIp, attempts);
+                        if (attempts >= MAX_ATTEMPTS) { ipBlocklist.set(clientIp, Date.now() + BLOCK_TIME); }
                     }
+                    ws.send(JSON.stringify({ type: 'LOGIN_FAIL', msg: '面板用户名或密码错误！' }));
                 }
-
-                // 2. 精准诊断：用户名对不对？
-                if (cmd.user !== PANEL_USER) {
-                    if (!isWhiteIp && (cmd.user !== '' || cmd.pass !== '')) { let a = (ipAttempts.get(clientIp) || 0) + 1; ipAttempts.set(clientIp, a); if (a >= MAX_ATTEMPTS) ipBlocklist.set(clientIp, Date.now() + BLOCK_TIME); }
-                    ws.send(JSON.stringify({ type: 'LOGIN_FAIL', msg: `【诊断报错：用户名不匹配】\n你输入的是：[${cmd.user}]\n服务器读到的是：[${PANEL_USER}]\n(如果显示为空，说明环境变量没生效，请重启容器)` }));
-                    return;
-                }
-
-                // 3. 精准诊断：密码哈希对不对？
-                if (inputHash !== PANEL_PASS_HASH) {
-                    if (!isWhiteIp && (cmd.user !== '' || cmd.pass !== '')) { let a = (ipAttempts.get(clientIp) || 0) + 1; ipAttempts.set(clientIp, a); if (a >= MAX_ATTEMPTS) ipBlocklist.set(clientIp, Date.now() + BLOCK_TIME); }
-                    ws.send(JSON.stringify({ type: 'LOGIN_FAIL', msg: `【诊断报错：密码错误】\n你输入的密码算出的哈希是：\n${inputHash}\n但服务器环境变量里填的是：\n${PANEL_PASS_HASH}\n(如果显示为空，说明环境变量没生效，请重启容器)` }));
-                    return;
-                }
-
-                // 4. 全部正确，放行！
-                ws.isAuthenticated = true; ipAttempts.delete(clientIp); 
-                ws.aesKey = cmd.pass ? crypto.createHash('sha256').update(cmd.pass).digest() : null;
-                ws.send(JSON.stringify({ type: 'LOGIN_SUCCESS', nodes: getSavedNodes(ws.aesKey), commands: getSavedCommands(ws.aesKey) }));
                 return;
             }
 
-            // ================= 【云端双保险箱操作 (需权限)】 =================
             if (cmd.type === 'GET_NODES' || cmd.type === 'SAVE_NODE' || cmd.type === 'DELETE_SAVED_NODE' || cmd.type === 'GET_COMMANDS' || cmd.type === 'SAVE_COMMAND' || cmd.type === 'DELETE_COMMAND') {
                 if (!ws.isAuthenticated) return;
                 
@@ -170,7 +155,6 @@ wss.on('connection', (ws, req) => {
                 return;
             }
 
-            // ================= 【无痕 SSH 直连通道 (无需面板鉴权)】 =================
             if (cmd.host) {
                 if (sshStream) return;
                 const creds = cmd; creds.tryKeyboard = true; creds.readyTimeout = 20000;
@@ -209,6 +193,7 @@ wss.on('connection', (ws, req) => {
                     if (prompts.length > 0 && prompts[0].prompt.toLowerCase().includes('password')) finish([creds.password]); else finish([]);
                 }).on('error', (err) => {
                     if (ws.readyState === WebSocket.OPEN) {
+                        // 【核心修改】：只有非白名单 IP 连错机器才会被记账封禁
                         if (!isWhiteIp && (err.message.toLowerCase().includes('authenticat') || err.message.includes('Handshake failed'))) {
                             let attempts = (ipAttempts.get(clientIp) || 0) + 1; ipAttempts.set(clientIp, attempts);
                             if (attempts >= MAX_ATTEMPTS) { ipBlocklist.set(clientIp, Date.now() + BLOCK_TIME); ws.send(JSON.stringify({ type: 'TERMINAL', data: `\r\n\x1b[1;41;37m [ 警报 ] \x1b[0m\x1b[31m IP 因爆破已被物理隔离！\x1b[0m\r\n` })); } 
@@ -226,7 +211,6 @@ wss.on('connection', (ws, req) => {
                 } else sshClient.connect(creds);
             }
             
-            // ================= 【终端广播与全盘漫游文件流】 =================
             if (cmd.type === 'TERMINAL_INPUT' && sshStream) sshStream.write(cmd.data);
             else if (cmd.type === 'UNZIP' && sshClient) {
                 const ext = cmd.path.toLowerCase(); let execCmd = '';
