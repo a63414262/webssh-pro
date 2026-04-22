@@ -13,15 +13,71 @@ app.use(express.static(path.join(__dirname, 'public')));
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
 
-// ================= 【云端保险箱与面板鉴权配置】 =================
+// ================= 【1. 核心环境变量配置】 =================
+// 传统密码鉴权配置
 const PANEL_USER = (process.env.PANEL_USER || '').trim();
 const PANEL_PASS_HASH = (process.env.PANEL_PASS_HASH || '').split(/\s+/)[0].trim().toLowerCase();
 const PANEL_IP_WHITELIST = (process.env.PANEL_IP_WHITELIST || '').split(',').map(ip => ip.trim()).filter(Boolean);
 
+// 【新增】：GitHub OAuth SSO 配置
+const GITHUB_CLIENT_ID = (process.env.GITHUB_CLIENT_ID || '').trim();
+const GITHUB_CLIENT_SECRET = (process.env.GITHUB_CLIENT_SECRET || '').trim();
+// 允许登录的 GitHub 用户名白名单（逗号分隔，如 xiaokfenxiang, admin）
+const GITHUB_ALLOWED_USERS = (process.env.GITHUB_ALLOWED_USERS || '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+
 const NODES_FILE = '/usr/src/app/nodes.json'; 
 const COMMANDS_FILE = '/usr/src/app/commands.json'; 
+const githubSessions = new Set(); // 存储有效的 GitHub 临时 Token
 
-// ================= 【JIT 军事级加解密引擎 (密钥不落地)】 =================
+// ================= 【2. GitHub OAuth 专用路由】 =================
+app.get('/api/config', (req, res) => {
+    res.json({ githubEnabled: !!(GITHUB_CLIENT_ID && GITHUB_CLIENT_SECRET) });
+});
+
+if (GITHUB_CLIENT_ID && GITHUB_CLIENT_SECRET) {
+    app.get('/auth/github', (req, res) => {
+        const redirectUri = encodeURIComponent(`http://${req.headers.host}/auth/github/callback`);
+        res.redirect(`https://github.com/login/oauth/authorize?client_id=${GITHUB_CLIENT_ID}&redirect_uri=${redirectUri}`);
+    });
+
+    app.get('/auth/github/callback', async (req, res) => {
+        const code = req.query.code;
+        if (!code) return res.send('OAuth 授权失败：未获取到回调 code。');
+        try {
+            // 换取 Access Token
+            const tokenRes = await fetch('https://github.com/login/oauth/access_token', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+                body: JSON.stringify({ client_id: GITHUB_CLIENT_ID, client_secret: GITHUB_CLIENT_SECRET, code })
+            });
+            const tokenData = await tokenRes.json();
+            if (tokenData.error) return res.send(`GitHub API 拒绝授权: ${tokenData.error_description}`);
+
+            // 获取 GitHub 用户身份
+            const userRes = await fetch('https://api.github.com/user', {
+                headers: { 'Authorization': `Bearer ${tokenData.access_token}`, 'User-Agent': 'WebSSH-Pro-MasterOS' }
+            });
+            const userData = await userRes.json();
+            const username = (userData.login || '').toLowerCase();
+
+            // 严格的白名单安全校验
+            if (GITHUB_ALLOWED_USERS.length > 0 && !GITHUB_ALLOWED_USERS.includes(username)) {
+                return res.send(`<h2>安全拦截 🚫</h2><p>您的 GitHub 账号 (@${username}) 不在系统的管理员白名单中！</p>`);
+            }
+
+            // 签发一次性 Session Token 存入内存
+            const sessionToken = crypto.randomBytes(32).toString('hex');
+            githubSessions.add(sessionToken);
+
+            // 重定向回主页面，并将 Token 放在 URL 里交给前端提取
+            res.redirect(`/?github_token=${sessionToken}`);
+        } catch (err) {
+            res.send('OAuth 认证服务器异常: ' + err.message);
+        }
+    });
+}
+
+// ================= 【3. JIT 军事级加解密引擎 (密钥不落地)】 =================
 const encryptData = (data, dynamicKey) => {
     if (!dynamicKey) return JSON.stringify(data); 
     try {
@@ -87,7 +143,7 @@ wss.on('connection', (ws, req) => {
         } else { ipBlocklist.delete(clientIp); ipAttempts.delete(clientIp); }
     }
 
-    ws.isAuthenticated = (!PANEL_USER && !PANEL_PASS_HASH);
+    ws.isAuthenticated = (!PANEL_USER && !PANEL_PASS_HASH && !GITHUB_CLIENT_ID);
 
     let sshClient = new Client(); let sshStream = null; let sftpSession = null; let monitorInterval = null;
 
@@ -104,6 +160,20 @@ wss.on('connection', (ws, req) => {
         try {
             const cmd = JSON.parse(message);
 
+            // ================= 【鉴权路由 1：GitHub OAuth 登录】 =================
+            if (cmd.type === 'GITHUB_LOGIN') {
+                if (githubSessions.has(cmd.token)) {
+                    ws.isAuthenticated = true; ipAttempts.delete(clientIp);
+                    // GitHub 模式下，使用 GITHUB_CLIENT_SECRET 派生云端保险箱 AES 密钥
+                    ws.aesKey = crypto.createHash('sha256').update(GITHUB_CLIENT_SECRET).digest();
+                    ws.send(JSON.stringify({ type: 'LOGIN_SUCCESS', nodes: getSavedNodes(ws.aesKey), commands: getSavedCommands(ws.aesKey) }));
+                } else {
+                    ws.send(JSON.stringify({ type: 'LOGIN_FAIL', msg: 'GitHub 授权状态已过期，请重新点击授权！' }));
+                }
+                return;
+            }
+
+            // ================= 【鉴权路由 2：传统密码 Hash 登录】 =================
             if (cmd.type === 'PANEL_LOGIN') {
                 const inputHash = cmd.pass ? crypto.createHash('sha256').update(cmd.pass).digest('hex').toLowerCase() : '';
                 const isMatch = (PANEL_USER === '' && PANEL_PASS_HASH === '') || (cmd.user === PANEL_USER && inputHash === PANEL_PASS_HASH);
@@ -123,7 +193,6 @@ wss.on('connection', (ws, req) => {
             }
 
             // ================= 【云端双保险箱操作 (需权限)】 =================
-            // 【核心新增】：加入了 RENAME_SAVED_NODE 路由
             if (cmd.type === 'GET_NODES' || cmd.type === 'SAVE_NODE' || cmd.type === 'DELETE_SAVED_NODE' || cmd.type === 'RENAME_SAVED_NODE' || cmd.type === 'GET_COMMANDS' || cmd.type === 'SAVE_COMMAND' || cmd.type === 'DELETE_COMMAND') {
                 if (!ws.isAuthenticated) return;
                 
