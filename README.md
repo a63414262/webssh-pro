@@ -84,6 +84,9 @@ PORT=8080
 PANEL_USER=admin                         # 你的自定义面板账号
 PANEL_PASS_HASH=8d969eef6ecad3c29a3a...  # 面板生成的 64 位 SHA-256 Hash 密文
 PANEL_IP_WHITELIST=1.1.1.1, 8.8.8.8      # (可选) IP 白名单，防止站长被防爆破系统误封
+GITHUB_CLIENT_ID=      
+GITHUB_CLIENT_SECRET=      
+GITHUB_ALLOWED_USERS=      
 ```
 
 *(注：如果不填写 `PANEL_USER` 和 `PANEL_PASS_HASH`，系统将默认永久锁定为「无痕访客体验模式」)*
