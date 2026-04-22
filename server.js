@@ -36,7 +36,8 @@ app.get('/api/config', (req, res) => {
 
 if (GITHUB_CLIENT_ID && GITHUB_CLIENT_SECRET) {
     app.get('/auth/github', (req, res) => {
-        const redirectUri = encodeURIComponent(`http://${req.headers.host}/auth/github/callback`);
+        const protocol = req.headers['x-forwarded-proto'] || req.protocol || 'http'; 
+        const redirectUri = encodeURIComponent(`${protocol}://${req.headers.host}/auth/github/callback`);
         res.redirect(`https://github.com/login/oauth/authorize?client_id=${GITHUB_CLIENT_ID}&redirect_uri=${redirectUri}`);
     });
 
