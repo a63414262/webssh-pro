@@ -123,7 +123,7 @@ GITHUB_ALLOWED_USERS="你的github用户名"
 
     点击页面上的 Generate a new client secret，你会得到一串长长的 Client Secret。
 
-把它们配到环境变量里，再将你的 GitHub 用户名（比如 xiaokfenxiang）填进 GITHUB_ALLOWED_USERS，重启容器。
+把它们配到环境变量里，再将你的 GitHub 用户名 填进 GITHUB_ALLOWED_USERS，重启容器。
 回到网页，点击那个霸气的 🐱 使用 GitHub 授权登录 按钮，感受终极极客的爽快吧！
 -----
 
