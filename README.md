@@ -62,10 +62,10 @@
 ghcr.io/a63414262/webssh-pro:latest
 ````
 
-### 2\. 容器基础配置要求
+### 2\. 容器基础配置要求 northflank免费配额即可
 
-  - **CPU**: 0.2 Core \~ 0.5 Core
-  - **内存 (Memory)**: ⚠️ 至少需分配 `512MB` (用于承载 AES-256 加密运算与底层的 WARP 网络引擎)
+  - **CPU**: 0.1 Core
+  - **内存 (Memory)**: ⚠️ 256MB
   - **暴露端口 (Port)**: `8080` (开启公网访问)
 
 ### 3\. 配置环境变量 (Environment Variables) ⚠️
