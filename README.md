@@ -115,9 +115,9 @@ GITHUB_ALLOWED_USERS="你的github用户名"
 
         Application name: WebSSH Pro (随便填)
 
-        Homepage URL: https://你的claw域名.com (必须填你实际部署的面板域名)
+        Homepage URL: https://你的northflank域名.com (必须填你实际部署的面板域名)
 
-        Authorization callback URL: https://你的claw域名.com/auth/github/callback (结尾一定是 /auth/github/callback)
+        Authorization callback URL: https://你的northflank域名.com/auth/github/callback (结尾一定是 /auth/github/callback)
 
     注册成功后，你会得到一个 Client ID。
 
