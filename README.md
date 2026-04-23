@@ -73,20 +73,19 @@ ghcr.io/a63414262/webssh-pro:latest
 为了极致的安全，本系统**不接受明文密码**。
 部署时，你可以直接访问未配置密码的面板，点击登录框下方的 **“🔧 算不出 Hash？点我一键生成”** 获取你专属的 Hash 值。
 
-在云平台填入以下环境变量：
+在northflank平台Environment variables
+选择env填入以下环境变量：
 
 ```text
-TZ=Asia/Shanghai
-NODE_ENV=production
-PORT=8080
-
-# --- 面板零信任鉴权配置 ---
-PANEL_USER=admin                         # 你的自定义面板账号
-PANEL_PASS_HASH=8d969eef6ecad3c29a3a...  # 面板生成的 64 位 SHA-256 Hash 密文
-PANEL_IP_WHITELIST=1.1.1.1, 8.8.8.8      # (可选) IP 白名单，防止站长被防爆破系统误封
-GITHUB_CLIENT_ID=      
-GITHUB_CLIENT_SECRET=      
-GITHUB_ALLOWED_USERS=      
+TZ="Asia/Shanghai"
+NODE_ENV="production"
+PORT="8080"
+PANEL_USER="admin"
+PANEL_PASS_HASH="密码哈希"
+PANEL_IP_WHITELIST="你自己的ip"
+GITHUB_CLIENT_ID="填你的"
+GITHUB_CLIENT_SECRET="填你的"
+GITHUB_ALLOWED_USERS="你的github用户名"    
 ```
 
 *(注：如果不填写 `PANEL_USER` 和 `PANEL_PASS_HASH`，系统将默认永久锁定为「无痕访客体验模式」)*
