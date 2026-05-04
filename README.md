@@ -1,3 +1,6 @@
+## 🤝 参与贡献 (Contributing)
+
+如果你喜欢这个项目，欢迎提交 Pull Request，或者给个 ⭐ **Star** 支持一下！
 
 # 🚀 WebSSH Pro | Master OS 集群终极堡垒机
 
@@ -126,10 +129,6 @@ GITHUB_ALLOWED_USERS="你的github用户名"
 把它们配到环境变量里，再将你的 GitHub 用户名 填进 GITHUB_ALLOWED_USERS，重启容器。
 回到网页，点击那个霸气的 🐱 使用 GitHub 授权登录 按钮，感受终极极客的爽快吧！
 -----
-
-## 🤝 参与贡献 (Contributing)
-
-如果你喜欢这个充满极客精神的项目，欢迎提交 Pull Request，或者给个 ⭐ **Star** 支持一下！
 
 ## 📄 开源协议 (License)
 
